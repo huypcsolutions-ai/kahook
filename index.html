@@ -1,0 +1,85 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>QuizBlast</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#46178f;color:#fff;min-height:100vh;display:flex;justify-content:center}
+main{width:100%;max-width:760px;padding:20px;text-align:center}h1{font-size:2.4rem;margin:.6em 0}
+.card{background:#fff;color:#222;border-radius:12px;padding:18px;margin:12px 0;text-align:left}
+input,textarea,select{width:100%;padding:12px;margin:6px 0;border:2px solid #ccc;border-radius:8px;font-size:1rem}
+button{background:#1368ce;color:#fff;border:0;border-radius:8px;padding:14px 20px;font-size:1.05rem;font-weight:700;cursor:pointer;margin:6px 0;width:100%}
+button.ghost{background:transparent;border:2px solid #fff}button.sm{width:auto;padding:8px 14px}
+.pin{font-size:4rem;font-weight:900;letter-spacing:.15em;background:#fff;color:#46178f;border-radius:12px;padding:10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.grid button{height:110px;font-size:1.2rem;margin:0}
+.big{font-size:1.6rem;font-weight:700;margin:16px 0}.chip{display:inline-block;background:#fff3;border-radius:20px;padding:6px 14px;margin:4px}
+.row{display:flex;justify-content:space-between;background:#fff;color:#222;border-radius:8px;padding:10px 14px;margin:6px 0}
+.bar{display:inline-block;height:14px;background:#fff;border-radius:7px;vertical-align:middle}.dim{opacity:.35}
+.ok{background:#26890c}.bad{background:#e21b3c}.panel{border-radius:12px;padding:26px;margin-top:30px}
+</style></head><body><main id="app"></main>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const s = io(), $ = id => document.getElementById(id), app = $('app');
+const COL = ['#e21b3c', '#1368ce', '#d89e00', '#26890c'], SYM = ['▲', '◆', '●', '■'];
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const h = html => app.innerHTML = html;
+let role = '', timer, cur = null;
+
+function home() {
+  role = ''; h(`<h1>QuizBlast</h1>
+  <div class="card"><input id="pin" placeholder="Mã PIN" inputmode="numeric"><input id="nm" placeholder="Tên của bạn" maxlength="20">
+  <button onclick="join()">Vào chơi</button><div id="err" style="color:#e21b3c"></div></div>
+  <button class="ghost" onclick="hostMenu()">Tôi là host / giáo viên</button>`);
+}
+function join() {
+  s.emit('player:join', { pin: $('pin').value.trim(), name: $('nm').value }, r => {
+    if (r.err) return $('err').textContent = r.err;
+    role = 'player'; h(`<h1>Đã vào phòng!</h1><div class="big">Chờ host bắt đầu…</div>`);
+  });
+}
+async function hostMenu() {
+  const qs = await (await fetch('/api/quizzes')).json();
+  h(`<h1>Chọn bộ câu hỏi</h1><div class="card"><select id="qz">${qs.map(q => `<option value="${esc(q.id)}">${esc(q.title)}</option>`).join('')}</select>
+  <button onclick="create()">Tạo phòng</button></div>
+  <div class="card"><b>Tạo quiz mới</b><input id="tt" placeholder="Tiêu đề">
+  <textarea id="js" rows="7">[{"q":"Câu hỏi?","options":["A","B","C","D"],"correct":0,"time":20}]</textarea>
+  <button onclick="save()">Lưu quiz</button><div id="err" style="color:#e21b3c"></div></div>
+  <button class="ghost" onclick="home()">← Quay lại</button>`);
+}
+async function save() {
+  try {
+    const r = await fetch('/api/quizzes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: $('tt').value, questions: JSON.parse($('js').value) }) });
+    if (!r.ok) throw new Error((await r.json()).err); hostMenu();
+  } catch (e) { $('err').textContent = e.message; }
+}
+function create() {
+  s.emit('host:create', $('qz').value, r => {
+    if (r.err) return alert(r.err); role = 'host';
+    h(`<h1>Vào bằng PIN</h1><div class="pin">${r.pin}</div><div id="pl" class="big">Chưa có ai</div>
+    <button onclick="s.emit('host:next')">Bắt đầu</button>`);
+  });
+}
+s.on('lobby', n => { if ($('pl')) $('pl').innerHTML = n.length ? n.map(x => `<span class="chip">${esc(x)}</span>`).join('') : 'Chưa có ai'; });
+s.on('question', q => {
+  cur = q; clearInterval(timer); let t = q.time;
+  const head = `<div>Câu ${q.i}/${q.total} · <b id="tm">${t}</b>s</div><div class="big">${esc(q.q)}</div>`;
+  if (role === 'host') h(head + `<div class="grid">${q.options.map((o, i) => `<div class="panel" style="margin:0;background:${COL[i]}">${SYM[i]} ${esc(o)}</div>`).join('')}</div><div id="an" class="big">0 đã trả lời</div>`);
+  else if (role === 'player') h(head + `<div class="grid">${q.options.map((_, i) => `<button style="background:${COL[i]}" onclick="ans(${i})">${SYM[i]} ${esc(q.options[i])}</button>`).join('')}</div>`);
+  timer = setInterval(() => { t--; if ($('tm')) $('tm').textContent = Math.max(t, 0); if (t <= 0) clearInterval(timer); }, 1000);
+});
+function ans(i) { s.emit('player:answer', i); h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`); }
+s.on('answered', d => { if ($('an')) $('an').textContent = `${d.done}/${d.total} đã trả lời`; });
+const board = t => t.map((p, i) => `<div class="row"><span>${i + 1}. ${esc(p.name)}</span><b>${p.score}</b></div>`).join('');
+s.on('reveal', d => {
+  clearInterval(timer); const mx = Math.max(...d.counts, 1);
+  h(`<div class="big">Đáp án đúng: ${SYM[d.correct]} ${esc(cur.options[d.correct])}</div>
+  ${cur.options.map((o, i) => `<div class="${i === d.correct ? '' : 'dim'}" style="text-align:left;margin:8px 0">${SYM[i]} <span class="bar" style="width:${d.counts[i] / mx * 60}%;background:${COL[i]}"></span> ${d.counts[i]}</div>`).join('')}
+  <h2>Bảng xếp hạng</h2>${board(d.top)}<button onclick="s.emit('host:next')">${d.last ? 'Kết thúc' : 'Câu tiếp theo'}</button>`);
+});
+s.on('result', r => {
+  clearInterval(timer);
+  h(`<div class="panel ${r.correct ? 'ok' : 'bad'}"><h1>${r.answered ? (r.correct ? 'Chính xác! 🎉' : 'Sai rồi 😅') : 'Hết giờ ⏰'}</h1>
+  <div class="big">+${r.gained}</div></div><div class="big">Tổng: ${r.score} · Hạng ${r.rank}</div>`);
+});
+s.on('end', t => h(`<h1>🏆 Kết quả</h1>${board(t)}<button onclick="location.reload()">Chơi lại</button>`));
+s.on('closed', () => { alert('Host đã thoát phòng'); home(); });
+home();
+</script></body></html>
