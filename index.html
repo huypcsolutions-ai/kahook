@@ -12,21 +12,22 @@ button.ghost{background:transparent;border:2px solid #fff}button.sm{width:auto;p
 .big{font-size:1.6rem;font-weight:700;margin:16px 0}.chip{display:inline-block;background:#fff3;border-radius:20px;padding:6px 14px;margin:4px}
 .row{display:flex;justify-content:space-between;background:#fff;color:#222;border-radius:8px;padding:10px 14px;margin:6px 0}
 .bar{display:inline-block;height:14px;background:#fff;border-radius:7px;vertical-align:middle}.dim{opacity:.35}
-.ok{background:#26890c}.bad{background:#e21b3c}.panel{border-radius:12px;padding:26px;margin-top:30px}
+.er{color:#e21b3c;margin-top:6px}.row.me{outline:3px solid #ffd602}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ck{display:block;margin:8px 0}small{display:block;color:#666;margin:6px 0}h2{margin:18px 0 6px}.ok{background:#26890c}.bad{background:#e21b3c}.panel{border-radius:12px;padding:26px;margin-top:30px}
 </style></head><body><main id="app"></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const s = io(), $ = id => document.getElementById(id), app = $('app');
 const COL = ['#e21b3c', '#1368ce', '#d89e00', '#26890c'], SYM = ['▲', '◆', '●', '■'];
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const h = html => app.innerHTML = html;
-let role = '', timer, cur = null;
+let role = '', timer, cur = null, pass = '', pending = null, pendingName = '';
 
 function home() {
   role = ''; h(`<h1>QuizBlast</h1>
   <div class="card"><input id="pin" placeholder="Mã PIN" inputmode="numeric"><input id="nm" placeholder="Tên của bạn" maxlength="20">
-  <button onclick="join()">Vào chơi</button><div id="err" style="color:#e21b3c"></div></div>
-  <button class="ghost" onclick="hostMenu()">Tôi là host / giáo viên</button>`);
+  <button onclick="join()">Vào chơi</button><div id="err" class="er"></div></div>
+  <button class="ghost" onclick="hostLogin()">Tôi là host / giáo viên</button>`);
 }
 function join() {
   s.emit('player:join', { pin: $('pin').value.trim(), name: $('nm').value }, r => {
@@ -34,50 +35,103 @@ function join() {
     role = 'player'; h(`<h1>Đã vào phòng!</h1><div class="big">Chờ host bắt đầu…</div>`);
   });
 }
-async function hostMenu() {
-  const qs = await (await fetch('/api/quizzes')).json();
-  h(`<h1>Chọn bộ câu hỏi</h1><div class="card"><select id="qz">${qs.map(q => `<option value="${esc(q.id)}">${esc(q.title)}</option>`).join('')}</select>
+function hostLogin() {
+  h(`<h1>Đăng nhập host</h1><div class="card"><input id="pw" type="password" placeholder="Mật khẩu host">
+  <button onclick="doLogin()">Đăng nhập</button><div id="err" class="er"></div></div><button class="ghost" onclick="home()">← Quay lại</button>`);
+  $('pw').addEventListener('keydown', e => e.key === 'Enter' && doLogin());
+}
+async function doLogin() { pass = $('pw').value; await hostMenu(true); }
+async function hostMenu(fromLogin) {
+  const r = await fetch('/api/quizzes', { headers: { 'x-pass': pass } });
+  if (!r.ok) { if (fromLogin) $('err').textContent = 'Sai mật khẩu'; else hostLogin(); return; }
+  const qs = await r.json(); pending = null;
+  h(`<h1>Bảng điều khiển host</h1>
+  <div class="card"><b>1. Chọn bộ câu hỏi</b><select id="qz">${qs.map(q => `<option value="${esc(q.id)}">${esc(q.title)}</option>`).join('')}</select>
+  <b>2. Cài đặt qua câu</b>
+  <label class="ck"><input type="checkbox" id="au" checked> Tự động qua câu khi hết thời gian chờ</label>
+  <div class="two"><div>Thời gian chờ tự qua (giây)<input id="wt" type="number" value="10" min="0" max="120"></div>
+  <div>Tối thiểu trước khi bấm qua được (giây)<input id="mn" type="number" value="5" min="0" max="60"></div></div>
+  <small>Bỏ chọn tự động = chỉ qua câu khi host bấm nút (sau thời gian tối thiểu).</small>
   <button onclick="create()">Tạo phòng</button></div>
-  <div class="card"><b>Tạo quiz mới</b><input id="tt" placeholder="Tiêu đề">
-  <textarea id="js" rows="7">[{"q":"Câu hỏi?","options":["A","B","C","D"],"correct":0,"time":20}]</textarea>
-  <button onclick="save()">Lưu quiz</button><div id="err" style="color:#e21b3c"></div></div>
-  <button class="ghost" onclick="home()">← Quay lại</button>`);
+  <div class="card"><b>Nạp câu hỏi mới</b><small>Cột A: câu hỏi · B,C,D,E: đáp án A,B,C,D · F: đáp án đúng (A/B/C/D) · G (tuỳ chọn): số giây</small>
+  <input type="file" id="fl" accept=".xlsx,.xls,.csv" onchange="loadFile(this.files[0])">
+  <input id="gs" placeholder="hoặc dán link Google Sheet (đã chia sẻ công khai)"><button class="sm" onclick="loadSheet()">Đọc Google Sheet</button>
+  <div id="pv"></div><div id="err" class="er"></div></div>
+  <button class="ghost" onclick="home()">Thoát</button>`);
+}
+function toQuestions(rows) {
+  const qs = []; let skipped = 0;
+  rows.forEach((r, i) => {
+    r = r.map(x => String(x ?? '').trim()); if (!r[0]) return;
+    const o = r.slice(1, 5); while (o.length && !o[o.length - 1]) o.pop();
+    const raw = (r[5] || '').toLowerCase(); let c = -1;
+    if (/^[a-d]$/.test(raw)) c = 'abcd'.indexOf(raw); else if (/^[1-4]$/.test(raw)) c = +raw - 1; else c = o.findIndex(x => x.toLowerCase() === raw);
+    if (o.length < 2 || c < 0 || c >= o.length || !o[c]) { if (i > 0) skipped++; return; }
+    const t = Number(r[6]); qs.push({ q: r[0], options: o, correct: c, time: t >= 5 && t <= 120 ? t : 20 });
+  });
+  return { qs, skipped };
+}
+function showPending(rows, name) {
+  const { qs, skipped } = toQuestions(rows);
+  if (!qs.length) { $('pv').innerHTML = ''; return $('err').textContent = 'Không đọc được câu hỏi nào. Kiểm tra lại định dạng cột.'; }
+  pending = qs; $('err').textContent = '';
+  $('pv').innerHTML = `<div class="big" style="font-size:1.1rem">Đọc được ${qs.length} câu${skipped ? ` (bỏ qua ${skipped} dòng lỗi)` : ''}. Câu đầu: ${esc(qs[0].q)}</div>
+  <input id="tt" placeholder="Tên bộ câu hỏi" value="${esc(name)}"><button onclick="save()">Lưu bộ câu hỏi</button>`;
+}
+async function loadFile(f) {
+  if (!f) return;
+  try { const wb = XLSX.read(await f.arrayBuffer()); showPending(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }), f.name.replace(/\.\w+$/, '')); }
+  catch { $('err').textContent = 'Không đọc được file'; }
+}
+async function loadSheet() {
+  const r = await fetch('/api/sheet?url=' + encodeURIComponent($('gs').value), { headers: { 'x-pass': pass } });
+  if (!r.ok) return $('err').textContent = (await r.json()).err;
+  const wb = XLSX.read(await r.text(), { type: 'string' });
+  showPending(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }), 'Google Sheet');
 }
 async function save() {
-  try {
-    const r = await fetch('/api/quizzes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: $('tt').value, questions: JSON.parse($('js').value) }) });
-    if (!r.ok) throw new Error((await r.json()).err); hostMenu();
-  } catch (e) { $('err').textContent = e.message; }
+  const r = await fetch('/api/quizzes', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-pass': pass },
+    body: JSON.stringify({ title: $('tt').value.trim() || 'Quiz', questions: pending }) });
+  if (!r.ok) return $('err').textContent = (await r.json()).err; hostMenu();
 }
 function create() {
-  s.emit('host:create', $('qz').value, r => {
+  s.emit('host:create', { pass, id: $('qz').value, auto: $('au').checked, wait: $('wt').value, min: $('mn').value }, r => {
     if (r.err) return alert(r.err); role = 'host';
     h(`<h1>Vào bằng PIN</h1><div class="pin">${r.pin}</div><div id="pl" class="big">Chưa có ai</div>
     <button onclick="s.emit('host:next')">Bắt đầu</button>`);
   });
 }
-s.on('lobby', n => { if ($('pl')) $('pl').innerHTML = n.length ? n.map(x => `<span class="chip">${esc(x)}</span>`).join('') : 'Chưa có ai'; });
+s.on('lobby', n => { if ($('pl')) $('pl').innerHTML = n.length ? `<div>${n.length} người chơi</div>` + n.map(x => `<span class="chip">${esc(x)}</span>`).join('') : 'Chưa có ai'; });
 s.on('question', q => {
   cur = q; clearInterval(timer); let t = q.time;
   const head = `<div>Câu ${q.i}/${q.total} · <b id="tm">${t}</b>s</div><div class="big">${esc(q.q)}</div>`;
   if (role === 'host') h(head + `<div class="grid">${q.options.map((o, i) => `<div class="panel" style="margin:0;background:${COL[i]}">${SYM[i]} ${esc(o)}</div>`).join('')}</div><div id="an" class="big">0 đã trả lời</div>`);
-  else if (role === 'player') h(head + `<div class="grid">${q.options.map((_, i) => `<button style="background:${COL[i]}" onclick="ans(${i})">${SYM[i]} ${esc(q.options[i])}</button>`).join('')}</div>`);
+  else if (role === 'player') h(head + `<div class="grid">${q.options.map((o, i) => `<button style="background:${COL[i]}" onclick="ans(${i})">${SYM[i]} ${esc(o)}</button>`).join('')}</div>`);
   timer = setInterval(() => { t--; if ($('tm')) $('tm').textContent = Math.max(t, 0); if (t <= 0) clearInterval(timer); }, 1000);
 });
 function ans(i) { s.emit('player:answer', i); h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`); }
 s.on('answered', d => { if ($('an')) $('an').textContent = `${d.done}/${d.total} đã trả lời`; });
-const board = t => t.map((p, i) => `<div class="row"><span>${i + 1}. ${esc(p.name)}</span><b>${p.score}</b></div>`).join('');
+const board = (t, me) => t.map((p, i) => `<div class="row ${p.name === me ? 'me' : ''}"><span>${i + 1}. ${esc(p.name)}</span><b>${p.score}</b></div>`).join('');
 s.on('reveal', d => {
-  clearInterval(timer); const mx = Math.max(...d.counts, 1);
+  clearInterval(timer); const mx = Math.max(...d.counts, 1), t0 = Date.now();
   h(`<div class="big">Đáp án đúng: ${SYM[d.correct]} ${esc(cur.options[d.correct])}</div>
   ${cur.options.map((o, i) => `<div class="${i === d.correct ? '' : 'dim'}" style="text-align:left;margin:8px 0">${SYM[i]} <span class="bar" style="width:${d.counts[i] / mx * 60}%;background:${COL[i]}"></span> ${d.counts[i]}</div>`).join('')}
-  <h2>Bảng xếp hạng</h2>${board(d.top)}<button onclick="s.emit('host:next')">${d.last ? 'Kết thúc' : 'Câu tiếp theo'}</button>`);
+  <h2>Bảng xếp hạng</h2>${board(d.top)}<button id="nx" disabled></button><div id="au2"></div>`);
+  const label = d.last ? 'Kết thúc' : 'Câu tiếp theo';
+  const tick = () => {
+    const e = (Date.now() - t0) / 1000, m = Math.ceil(d.min - e);
+    if (!$('nx')) return clearInterval(timer);
+    $('nx').disabled = m > 0; $('nx').textContent = m > 0 ? `${label} (chờ ${m}s)` : label; $('nx').onclick = () => s.emit('host:next');
+    if (d.auto) $('au2').textContent = `Tự động qua sau ${Math.max(Math.ceil(d.wait - e), 0)}s`;
+  };
+  tick(); timer = setInterval(tick, 500);
 });
 s.on('result', r => {
   clearInterval(timer);
-  h(`<div class="panel ${r.correct ? 'ok' : 'bad'}"><h1>${r.answered ? (r.correct ? 'Chính xác! 🎉' : 'Sai rồi 😅') : 'Hết giờ ⏰'}</h1>
-  <div class="big">+${r.gained}</div></div><div class="big">Tổng: ${r.score} · Hạng ${r.rank}</div>`);
+  h(`<div class="panel ${r.correct ? 'ok' : 'bad'}"><h1>${r.answered ? (r.correct ? 'ĐÚNG! 🎉' : 'SAI 😅') : 'Hết giờ ⏰'}</h1>
+  <div class="big">+${r.gained} điểm</div>${r.correct ? '' : `<div>Đáp án đúng: <b>${esc(r.correctText)}</b></div>`}</div>
+  <div class="big">Tổng ${r.score} điểm · Hạng ${r.rank}/${r.total}</div>
+  <h2>Bảng xếp hạng</h2>${board(r.top, r.name)}`);
 });
 s.on('end', t => h(`<h1>🏆 Kết quả</h1>${board(t)}<button onclick="location.reload()">Chơi lại</button>`));
 s.on('closed', () => { alert('Host đã thoát phòng'); home(); });
