@@ -1,6 +1,6 @@
 const express = require('express'), http = require('http'), path = require('path'), fs = require('fs');
 const { Server } = require('socket.io');
-const app = express(), server = http.createServer(app), io = new Server(server);
+const app = express(), server = http.createServer(app), io = new Server(server, { maxHttpBufferSize: 2e6 });
 const PASS = process.env.HOST_PASS || 'hch';
 app.use(express.json({ limit: '1mb' }));
 const root = fs.existsSync(path.join(__dirname, 'public', 'index.html')) ? path.join(__dirname, 'public') : __dirname;
@@ -117,7 +117,8 @@ io.on('connection', s => {
     let pin; do pin = String(Math.floor(100000 + Math.random() * 900000)); while (games[pin]);
     const min = clamp(o.min, 0, 60, 5), wait = Math.max(min, clamp(o.wait, 0, 120, 10));
     const questions = o.shuffleQ ? shuf([...quiz.questions]) : quiz.questions;
-    games[pin] = { host: s.id, quiz, questions, players: {}, state: 'lobby', qi: -1, auto: !!o.auto, min, wait, shuffleA: !!o.shuffleA };
+    games[pin] = { host: s.id, quiz, questions, players: {}, state: 'lobby', qi: -1, auto: !!o.auto, min, wait, shuffleA: !!o.shuffleA,
+      bg: typeof o.bg === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(o.bg) && o.bg.length < 700000 ? o.bg : '' };
     s.join(pin); s.data.pin = pin; cb({ pin });
   });
   // Vào mới hoặc vào lại (cùng tên: giữ nguyên điểm)
@@ -136,6 +137,7 @@ io.on('connection', s => {
     s.join(pin); s.data.pin = pin; s.data.key = key;
     io.to(g.host).emit('lobby', lobby(g));
     cb({ ok: 1, token: p.token, name: p.name, state: g.state });
+    if (g.bg) s.emit('bg', g.bg);
     if (g.state !== 'lobby') { sync(g, p, s); progress(g); }
   });
   s.on('host:kick', key => {
