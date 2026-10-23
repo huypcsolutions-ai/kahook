@@ -14,7 +14,8 @@ button.ghost{background:transparent;border:2px solid #fff}button.sm{width:auto;p
 .bar{display:inline-block;height:14px;background:#fff;border-radius:7px;vertical-align:middle}.dim{opacity:.35}
 .er{color:#e21b3c;margin-top:6px}.row.me{outline:3px solid #ffd602}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ck{display:block;margin:8px 0}small{display:block;color:#666;margin:6px 0}h2{margin:18px 0 6px}.ok{background:#26890c}.bad{background:#e21b3c}.panel{border-radius:12px;padding:26px;margin-top:30px}
 .mod{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:20;padding:20px}.box{background:#fff;color:#222;border-radius:12px;padding:22px;max-width:360px;width:100%;text-align:center}.box button.ghost{color:#555;border-color:#aaa}input[type=range]{padding:0}body{text-shadow:0 1px 3px #0006}.card,.row,.box{text-shadow:none}
-</style></head><body><div id="net" style="display:none;position:fixed;top:0;left:0;right:0;background:#e21b3c;padding:6px;font-size:.9rem">Mất kết nối, đang kết nối lại…</div><main id="app"></main>
+#wrap{width:100%;max-width:760px}.brand{display:flex;align-items:center;justify-content:center;gap:14px;background:#0006;border-bottom:4px solid #ffd602;border-radius:12px;padding:10px 16px;margin:12px 20px 0;text-align:left}.brand img{max-height:64px;max-width:130px;object-fit:contain}.brand .bt{font-size:1.4rem;font-weight:800;line-height:1.2}.brand .bs{opacity:.92;margin-top:2px}.pvw{position:fixed;inset:0;z-index:15;background-color:#46178f;background-size:cover;background-position:center;background-attachment:fixed;overflow:auto;padding:12px;color:#fff;cursor:pointer;text-align:center}
+</style></head><body><div id="net" style="display:none;position:fixed;top:0;left:0;right:0;background:#e21b3c;padding:6px;font-size:.9rem">Mất kết nối, đang kết nối lại…</div><div id="wrap"><div id="brand"></div><main id="app"></main></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -25,7 +26,7 @@ const h = html => app.innerHTML = html;
 let role = '', timer, cur = null, tok = '', pending = null, pendingName = '';
 
 function home() {
-  role = ''; gameActive = false; stopMusic(); setBg(''); if ($('snd')) $('snd').remove(); sessionStorage.removeItem('qbp'); sessionStorage.removeItem('qbh'); h(`<h1>QuizBlast</h1>
+  role = ''; gameActive = false; stopMusic(); setBg(''); setBrand(null); if ($('snd')) $('snd').remove(); sessionStorage.removeItem('qbp'); sessionStorage.removeItem('qbh'); h(`<h1>QuizBlast</h1>
   <div class="card"><input id="pin" placeholder="Mã PIN" inputmode="numeric"><input id="nm" placeholder="Tên của bạn" maxlength="20">
   <button onclick="join()">Vào chơi</button><div id="err" class="er"></div></div>
   <button class="ghost" onclick="hostLogin()">Tôi là host / giáo viên</button>`);
@@ -55,7 +56,7 @@ async function doLogin() {
 async function hostMenu(fromLogin) {
   const r = await fetch('/api/quizzes', { headers: { 'x-token': tok } });
   if (!r.ok) { sessionStorage.removeItem('qbp'); hostLogin(); return; }
-  sessionStorage.qbp = tok; sessionStorage.removeItem('qbh'); stopMusic(); setBg(''); if ($('snd')) $('snd').remove();
+  sessionStorage.qbp = tok; sessionStorage.removeItem('qbh'); stopMusic(); setBg(''); setBrand(null); if ($('snd')) $('snd').remove();
   const qs = await r.json(); pending = null;
   let rr = { enabled: false };
   try { rr = await (await fetch('/api/results', { headers: { 'x-token': tok } })).json(); } catch {}
@@ -76,6 +77,12 @@ async function hostMenu(fromLogin) {
   <div class="two"><div>Âm lượng<input type="range" id="vol" min="0" max="100" value="50"></div><div><br><button class="sm" onclick="previewMusic()">▶ Nghe thử / dừng</button></div></div>
   <div>Hình nền (hiện trên cả máy người chơi)<input type="file" id="bgf" accept="image/*" onchange="loadBg(this.files[0])"><small id="bgs"></small></div>
   <small>Nhạc phát trên máy host (chiếu lên màn hình lớp). File nhạc tự tải lên chỉ dùng cho lần này.</small>
+  <b>4. Banner sự kiện (hiện trên mọi màn hình)</b>
+  <input id="bt" placeholder="Tên chương trình / sự kiện (VD: HCH EVENT 2026)" maxlength="80">
+  <input id="bs" placeholder="Dòng chào (VD: Chào mừng các bạn đến với …)" maxlength="120">
+  <div class="two"><div>Màu nhấn<input type="color" id="bc" value="#ffd602" style="height:46px;padding:2px"></div>
+  <div>Logo (PNG/JPG, tự thu nhỏ)<input type="file" id="blf" accept="image/*" onchange="loadLogo(this.files[0])"><small id="bls"></small></div></div>
+  <button class="ghost" style="color:#1368ce;border-color:#1368ce" onclick="previewUI()">👁 Xem thử giao diện thực tế (nền + banner)</button>
   <button onclick="create()">Tạo phòng</button></div>
   ${resHtml}
   <div class="card"><b>Nạp câu hỏi mới</b><small>Cột A: câu hỏi · B,C,D,E: đáp án A,B,C,D · F: đáp án đúng (A/B/C/D) · G (tuỳ chọn): số giây</small>
@@ -89,6 +96,8 @@ async function hostMenu(fromLogin) {
   $('mu').onchange = () => { $('muf').style.display = $('mu').value === 'custom' ? 'block' : 'none'; };
   $('muf').onchange = e => { if (e.target.files[0]) customUrl = URL.createObjectURL(e.target.files[0]); };
   bgData = localStorage.qb_bg || ''; refreshBg();
+  const bs = JSON.parse(localStorage.qb_brand || '{}'); $('bt').value = bs.title || ''; $('bs').value = bs.sub || ''; $('bc').value = bs.color || '#ffd602';
+  logoData = localStorage.qb_logo || ''; refreshLogo();
 }
 function toQuestions(rows) {
   const qs = [], bad = [];
@@ -140,11 +149,12 @@ function create() {
   const music = $('mu').value, v = $('vol').value / 100, src = musicSrc();
   try { localStorage.qb_set = JSON.stringify({ music, vol: $('vol').value }); } catch {}
   curTitle = (($('qz').selectedOptions[0]) || {}).text || 'Quiz';
-  s.emit('host:create', { token: tok, id: $('qz').value, auto: $('au').checked, shuffleQ: $('sq').checked, shuffleA: $('sa').checked, wait: $('wt').value, min: $('mn').value, bg: bgData }, r => {
+  const brand = readBrand(); try { localStorage.qb_brand = JSON.stringify({ title: brand.title, sub: brand.sub, color: brand.color }); } catch {}
+  s.emit('host:create', { token: tok, id: $('qz').value, auto: $('au').checked, shuffleQ: $('sq').checked, shuffleA: $('sa').checked, wait: $('wt').value, min: $('mn').value, bg: bgData, brand }, r => {
     if (r.err) { alert(r.err); if (/phiên/.test(r.err)) hostLogin(); return; }
     role = 'host'; gameActive = true; muted = false;
     sessionStorage.qbh = JSON.stringify({ pin: r.pin, htoken: r.htoken, title: curTitle, bg: !!bgData });
-    setBg(bgData); stopMusic(); if (src) startMusic(src, v); soundBtn(); hostLobby(r.pin);
+    setBg(bgData); setBrand(brand); stopMusic(); if (src) startMusic(src, v); soundBtn(); hostLobby(r.pin);
   });
 }
 // ---- âm thanh / hình nền / hiệu ứng / hộp xác nhận / lưu kết quả ----
@@ -160,10 +170,40 @@ function soundBtn() {
   b.style.cssText = 'position:fixed;top:8px;right:8px;width:auto;z-index:8;padding:6px 10px'; b.textContent = '🔊';
   b.onclick = () => { muted = !muted; bgm.muted = muted; b.textContent = muted ? '🔇' : '🔊'; }; document.body.appendChild(b);
 }
-function setBg(u) {
-  const b = document.body.style;
-  b.backgroundImage = u ? `linear-gradient(rgba(0,0,0,.4),rgba(0,0,0,.4)),url("${u}")` : '';
-  b.backgroundSize = 'cover'; b.backgroundPosition = 'center'; b.backgroundAttachment = 'fixed';
+const bgCss = u => u ? `linear-gradient(rgba(0,0,0,.4),rgba(0,0,0,.4)),url("${u}")` : '';
+function setBg(u) { const b = document.body.style; b.backgroundImage = bgCss(u); b.backgroundSize = 'cover'; b.backgroundPosition = 'center'; b.backgroundAttachment = 'fixed'; }
+// ---- banner sự kiện + xem thử ----
+let logoData = '';
+const brandHtml = b => {
+  if (!b || !(b.title || b.sub || b.logo)) return '';
+  const col = /^#[0-9a-f]{6}$/i.test(b.color || '') ? b.color : '#ffd602';
+  return `<div class="brand" style="border-color:${col}">${b.logo ? `<img src="${esc(b.logo)}" alt="">` : ''}<div>${b.title ? `<div class="bt">${esc(b.title)}</div>` : ''}${b.sub ? `<div class="bs">${esc(b.sub)}</div>` : ''}</div></div>`;
+};
+const setBrand = b => { const e = $('brand'); if (e) e.innerHTML = brandHtml(b); };
+const readBrand = () => ({ title: $('bt').value.trim(), sub: $('bs').value.trim(), color: $('bc').value, logo: logoData });
+s.on('brand', b => setBrand(b));
+function refreshLogo() { $('bls').innerHTML = logoData ? '✔ Đã chọn logo · <a href="#" style="color:#1368ce" onclick="clearLogo();return false">xoá</a>' : 'Chưa chọn'; }
+function clearLogo() { logoData = ''; localStorage.removeItem('qb_logo'); refreshLogo(); }
+async function loadLogo(f) {
+  if (!f) return;
+  try {
+    const img = new Image(); img.src = URL.createObjectURL(f); await img.decode();
+    let k = Math.min(1, 256 / Math.max(img.width, img.height)), u;
+    do {
+      const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(img.width * k)); cv.height = Math.max(1, Math.round(img.height * k));
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); u = cv.toDataURL('image/png'); k *= .75;
+    } while (u.length > 190000 && k > .05);
+    logoData = u; try { localStorage.qb_logo = u; } catch {} refreshLogo();
+  } catch { $('bls').textContent = 'Không đọc được ảnh'; }
+}
+function previewUI() {
+  const d = document.createElement('div'); d.className = 'pvw'; d.style.backgroundImage = bgCss(bgData);
+  d.innerHTML = `<div style="max-width:760px;margin:0 auto">${brandHtml(readBrand())}<h1>Vào bằng PIN</h1><div class="pin">123456</div><div class="big">3 người chơi</div>
+  <span class="chip">An</span><span class="chip">Bình</span><span class="chip">Chi</span>
+  <div class="big" style="margin-top:26px">Câu 1/10 · 20s<br>Thủ đô của Việt Nam?</div>
+  <div class="grid">${['Hà Nội', 'Huế', 'Đà Nẵng', 'TP.HCM'].map((o, i) => `<div class="panel" style="margin:0;background:${COL[i]}">${SYM[i]} ${o}</div>`).join('')}</div>
+  <p style="margin-top:24px;opacity:.85">👆 Bấm vào bất kỳ đâu để đóng xem thử</p></div>`;
+  d.onclick = () => d.remove(); document.body.appendChild(d);
 }
 function refreshBg() { $('bgs').innerHTML = bgData ? '✔ Đã chọn hình nền · <a href="#" style="color:#1368ce" onclick="clearBg();return false">xoá</a>' : 'Chưa chọn'; }
 function clearBg() { bgData = ''; localStorage.removeItem('qb_bg'); refreshBg(); }
@@ -255,7 +295,7 @@ s.on('reveal', d => {
   clearInterval(timer); const mx = Math.max(...d.counts, 1), t0 = Date.now();
   h(`<div class="big">Đáp án đúng: ${SYM[d.correct]} ${esc(d.options[d.correct])}</div>
   ${d.options.map((o, i) => `<div class="${i === d.correct ? '' : 'dim'}" style="text-align:left;margin:8px 0">${SYM[i]} ${esc(o)} <span class="bar" style="width:${d.counts[i] / mx * 60}%;background:${COL[i]}"></span> ${d.counts[i]}</div>`).join('')}
-  <h2>Bảng xếp hạng</h2>${board(d.top)}<button id="nx" disabled></button><div id="au2"></div>`);
+  <h2>Bảng xếp hạng</h2>${board(d.top)}<button id="nx" disabled></button><div id="au2" class="big" style="color:#ffd602"></div>`);
   const label = d.last ? 'Kết thúc' : 'Câu tiếp theo';
   const tick = () => {
     const e = (Date.now() - t0) / 1000, m = Math.ceil(d.min - e);
@@ -269,8 +309,11 @@ s.on('result', r => {
   clearInterval(timer);
   h(`<div class="panel ${r.correct ? 'ok' : 'bad'}"><h1>${r.answered ? (r.correct ? 'ĐÚNG! 🎉' : 'SAI 😅') : 'Hết giờ ⏰'}</h1>
   <div class="big">+${r.gained} điểm</div>${r.correct ? '' : `<div>Đáp án đúng: <b>${esc(r.correctText)}</b></div>`}</div>
-  <div class="big">Tổng ${r.score} điểm · Hạng ${r.rank}/${r.total}</div>
+  <div class="big">Tổng ${r.score} điểm · Hạng ${r.rank}/${r.total}</div><div id="pn" class="big" style="color:#ffd602"></div>
   <h2>Bảng xếp hạng</h2>${board(r.top, r.name)}`);
+  const left0 = r.left, t0 = Date.now(), lab = r.last ? 'Kết quả cuối cùng sau' : 'Câu tiếp theo sau';
+  const tk = () => { if (!$('pn')) return clearInterval(timer); $('pn').textContent = left0 == null ? 'Chờ host chuyển câu…' : `${lab} ${Math.max(Math.ceil(left0 - (Date.now() - t0) / 1000), 0)}s`; };
+  tk(); timer = setInterval(tk, 500);
 });
 s.on('saveStatus', d => { const e = $('sv'); if (e) { e.style.color = d.ok ? '#9f9' : '#ffd602'; e.textContent = d.ok ? '✔ Đã lưu lên Supabase' : `⚠ Chưa lưu được lên Supabase (${d.msg}). Hệ thống đang thử lại; kết quả vẫn có trong trình duyệt.`; } });
 let lastEnd = null;
