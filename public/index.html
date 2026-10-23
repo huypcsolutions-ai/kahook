@@ -242,7 +242,7 @@ function drawQ(note) {
   timer = setInterval(() => { const t = Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0); if ($('tm')) $('tm').textContent = t; if (t <= 0) clearInterval(timer); }, 500);
 }
 s.on('question', q => { cur = q; qEnd = Date.now() + q.time * 1000; drawQ(); });
-const showSent = () => h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`);
+function showSent() { h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`); }
 function ans(i) {
   document.querySelectorAll('.grid button').forEach(b => b.disabled = true);
   let done = false;
