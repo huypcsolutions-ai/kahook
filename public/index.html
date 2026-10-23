@@ -15,6 +15,27 @@ button.ghost{background:transparent;border:2px solid #fff}button.sm{width:auto;p
 .er{color:#e21b3c;margin-top:6px}.row.me{outline:3px solid #ffd602}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ck{display:block;margin:8px 0}small{display:block;color:#666;margin:6px 0}h2{margin:18px 0 6px}.ok{background:#26890c}.bad{background:#e21b3c}.panel{border-radius:12px;padding:26px;margin-top:30px}
 .mod{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:20;padding:20px}.box{background:#fff;color:#222;border-radius:12px;padding:22px;max-width:360px;width:100%;text-align:center}.box button.ghost{color:#555;border-color:#aaa}input[type=range]{padding:0}body{text-shadow:0 1px 3px #0006}.card,.row,.box{text-shadow:none}
 #wrap{width:100%;max-width:760px}.brand{display:flex;align-items:center;justify-content:center;gap:14px;background:#0006;border-bottom:4px solid #ffd602;border-radius:12px;padding:10px 16px;margin:12px 20px 0;text-align:left}.brand img{max-height:64px;max-width:130px;object-fit:contain}.brand .bt{font-size:1.4rem;font-weight:800;line-height:1.2}.brand .bs{opacity:.92;margin-top:2px}.pvw{position:fixed;inset:0;z-index:15;background-color:#46178f;background-size:cover;background-position:center;background-attachment:fixed;overflow:auto;padding:12px;color:#fff;cursor:pointer;text-align:center}
+
+/* ===== Giao diện nâng cấp ===== */
+body{background:radial-gradient(1200px 600px at 50% -10%,#7b2ff7aa,transparent),linear-gradient(160deg,#2b0a5e,#46178f 55%,#1d0a45);background-attachment:fixed;font-family:"Segoe UI",system-ui,Roboto,sans-serif}
+h1{font-weight:900;letter-spacing:.5px;text-shadow:0 3px 0 #0004}
+.card{border-radius:18px;box-shadow:0 8px 0 #0003,0 14px 30px #0004}
+button{border-radius:14px;box-shadow:0 5px 0 #0003;transition:transform .08s,filter .15s}
+button:hover:not(:disabled){filter:brightness(1.08)}button:active:not(:disabled){transform:translateY(4px);box-shadow:0 1px 0 #0003}button:disabled{opacity:.55;cursor:not-allowed}
+input,select,textarea{border-radius:12px;font-family:inherit}
+.pin{font-size:clamp(2.6rem,12vw,4.6rem);border-radius:18px;box-shadow:0 8px 0 #0003}
+.grid button,.grid .panel{border-radius:16px;font-weight:800;box-shadow:0 6px 0 #0003}
+.chip{background:#ffffff26;border:1px solid #ffffff40;font-weight:600}
+.tbar{height:12px;background:#0004;border-radius:8px;overflow:hidden;margin:10px 0}.tbar i{display:block;height:100%;background:linear-gradient(90deg,#26d07c,#ffd602 60%,#e21b3c);transition:width .5s linear}
+.panel{animation:pop .35s ease-out}@keyframes pop{0%{transform:scale(.85);opacity:0}100%{transform:scale(1);opacity:1}}
+.pod{display:flex;align-items:flex-end;justify-content:center;gap:8px;margin:18px 0 10px}
+.pod>div{flex:1;max-width:200px;text-align:center}
+.pod .nm{font-weight:800;margin-bottom:4px;word-break:break-word;font-size:.95rem}.pod .pt{font-weight:700;opacity:.9;margin-bottom:4px}
+.pod .bar2{border-radius:12px 12px 0 0;display:flex;align-items:flex-start;justify-content:center;font-size:2rem;padding-top:6px;box-shadow:0 -4px 0 #fff3 inset}
+.pod .p1 .bar2{height:130px;background:linear-gradient(#ffd602,#c99a00)}.pod .p2 .bar2{height:96px;background:linear-gradient(#d9dde3,#9aa3ad)}.pod .p3 .bar2{height:70px;background:linear-gradient(#e0975a,#a0602b)}
+.pod .me .nm{color:#ffd602;text-decoration:underline}
+@media(max-width:480px){main{padding:12px}.grid button,.grid .panel{height:92px;font-size:1.02rem}.big{font-size:1.35rem}.brand{margin:8px 8px 0}.brand .bt{font-size:1.1rem}.brand img{max-height:48px;max-width:90px}.row{padding:8px 10px}}
+@media(min-width:1000px){#wrap{max-width:980px}main{max-width:none}.grid button,.grid .panel{height:140px;font-size:1.5rem}.big{font-size:2rem}}
 </style></head><body><div id="net" style="display:none;position:fixed;top:0;left:0;right:0;background:#e21b3c;padding:6px;font-size:.9rem">Mất kết nối, đang kết nối lại…</div><div id="wrap"><div id="brand"></div><main id="app"></main></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
@@ -276,10 +297,10 @@ s.on('disconnect', () => { if (role) $('net').style.display = 'block'; });
 let qEnd = 0;
 function drawQ(note) {
   clearInterval(timer); const q = cur;
-  const head = `<div>Câu ${q.i}/${q.total} · <b id="tm">${Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0)}</b>s</div><div class="big">${esc(q.q)}</div>`;
+  const head = `<div>Câu ${q.i}/${q.total} · <b id="tm">${Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0)}</b>s</div><div class="tbar"><i id="tb" style="width:100%"></i></div><div class="big">${esc(q.q)}</div>`;
   if (role === 'host') h(head + `<div class="grid">${q.options.map((o, i) => `<div class="panel" style="margin:0;background:${COL[i]}">${SYM[i]} ${esc(o)}</div>`).join('')}</div><div id="an" class="big">0 đã trả lời</div>`);
   else if (role === 'player') h(head + (note ? `<div class="er" style="color:#ffd602">${esc(note)}</div>` : '') + `<div class="grid">${q.options.map((o, i) => `<button style="background:${COL[i]}" onclick="ans(${i})">${SYM[i]} ${esc(o)}</button>`).join('')}</div>`);
-  timer = setInterval(() => { const t = Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0); if ($('tm')) $('tm').textContent = t; if (t <= 0) clearInterval(timer); }, 500);
+  timer = setInterval(() => { const t = Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0); if ($('tm')) $('tm').textContent = t; if ($('tb')) $('tb').style.width = Math.max(0, (qEnd - Date.now()) / (q.time * 1000) * 100) + '%'; if (t <= 0) clearInterval(timer); }, 500);
 }
 s.on('question', q => { cur = q; qEnd = Date.now() + q.time * 1000; drawQ(); });
 function showSent() { h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`); }
@@ -290,7 +311,13 @@ function ans(i) {
   s.emit('player:answer', i, r => { if (done) return; done = true; clearTimeout(to); if (r && r.ok) showSent(); else drawQ((r && r.err) || 'Chưa gửi được, hãy chọn lại'); });
 }
 s.on('answered', d => { if ($('an')) $('an').textContent = `${d.done}/${d.total} đã trả lời`; });
-const board = (t, me) => t.map((p, i) => `<div class="row ${p.name === me ? 'me' : ''}"><span>${i + 1}. ${esc(p.name)}</span><b>${p.score}</b></div>`).join('');
+const board = (t, me) => {
+  const medal = ['🥇', '🥈', '🥉'], cls = ['p1', 'p2', 'p3'], top3 = t.slice(0, 3);
+  const slot = i => top3[i] ? `<div class="${cls[i]} ${top3[i].name === me ? 'me' : ''}"><div class="nm">${esc(top3[i].name)}</div><div class="pt">${top3[i].score}</div><div class="bar2">${medal[i]}</div></div>` : '';
+  const pod = top3.length ? `<div class="pod">${slot(1)}${slot(0)}${slot(2)}</div>` : '';
+  const rest = t.slice(3).map((p, i) => `<div class="row ${p.name === me ? 'me' : ''}"><span>${i + 4}. ${esc(p.name)}</span><b>${p.score}</b></div>`).join('');
+  return pod + rest;
+};
 s.on('reveal', d => {
   clearInterval(timer); const mx = Math.max(...d.counts, 1), t0 = Date.now();
   h(`<div class="big">Đáp án đúng: ${SYM[d.correct]} ${esc(d.options[d.correct])}</div>
