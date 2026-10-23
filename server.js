@@ -15,7 +15,7 @@ app.get('/sounds/:f', (req, res) => { const p = SND.includes(req.params.f) && fi
 app.use(express.static(root));
 app.get('/', (_, res) => res.sendFile(path.join(root, 'index.html')));
 app.get('/api/health', (_, res) => res.json({ index: fs.existsSync(path.join(root, 'index.html')),
-  sounds: Object.fromEntries(SND.map(f => [f, !!findSound(f)])), supabase: !!sb, hostPassSet: !!PASS }));
+  sounds: Object.fromEntries(SND.map(f => [f, !!findSound(f)])), supabase: !!sb, hostPassSet: !!PASS, rooms: Object.keys(games).length, uptimeSec: Math.round(process.uptime()) }));
 
 // ---------- Supabase (tuỳ chọn) ----------
 let sb = null;
@@ -43,17 +43,38 @@ app.post('/api/login', (req, res) => {
 });
 
 // ---------- quiz ----------
-const valid = qs => Array.isArray(qs) && qs.length > 0 && qs.length <= 200 && qs.every(x =>
-  x && typeof x.q === 'string' && Array.isArray(x.options) && x.options.length >= 2 && x.options.length <= 4 &&
-  Number.isInteger(x.correct) && x.correct >= 0 && x.correct < x.options.length);
+const LIM = { title: 100, q: 300, opt: 120, count: 200 };
+// Kiểm tra + chuẩn hoá bộ câu hỏi. Trả về { qs } hoặc { err }
+function clean(qs) {
+  if (!Array.isArray(qs) || !qs.length) return { err: 'Quiz chưa có câu hỏi nào' };
+  if (qs.length > LIM.count) return { err: `Tối đa ${LIM.count} câu hỏi` };
+  const out = [];
+  for (let i = 0; i < qs.length; i++) {
+    const x = qs[i], n = `Câu ${i + 1}: `;
+    if (!x || typeof x.q !== 'string' || !Array.isArray(x.options)) return { err: n + 'sai định dạng' };
+    const q = x.q.trim(), o = x.options.map(v => (typeof v === 'string' || typeof v === 'number') ? String(v).trim() : '');
+    if (!q) return { err: n + 'thiếu nội dung câu hỏi' };
+    if (q.length > LIM.q) return { err: n + `câu hỏi dài quá ${LIM.q} ký tự` };
+    if (o.length < 2 || o.length > 4) return { err: n + 'cần 2–4 đáp án' };
+    if (o.some(v => !v)) return { err: n + 'có đáp án bị trống' };
+    if (o.some(v => v.length > LIM.opt)) return { err: n + `đáp án dài quá ${LIM.opt} ký tự` };
+    if (!Number.isInteger(x.correct) || x.correct < 0 || x.correct >= o.length) return { err: n + 'đáp án đúng không hợp lệ' };
+    const t = x.time == null ? 20 : Number(x.time);
+    if (!Number.isInteger(t) || t < 5 || t > 120) return { err: n + 'thời gian phải là số nguyên 5–120 giây' };
+    out.push({ q, options: o, correct: x.correct, time: t });
+  }
+  return { qs: out };
+}
 app.get('/api/quizzes', auth, async (_, res) => {
   if (!sb) return res.json(mem.map(({ id, title }) => ({ id, title })));
   const { data } = await sb.from('quizzes').select('id,title').order('created_at', { ascending: false }).limit(100);
   res.json(data || []);
 });
 app.post('/api/quizzes', auth, async (req, res) => {
-  const { title, questions } = req.body || {};
-  if (!title || !valid(questions)) return res.status(400).json({ err: 'Dữ liệu quiz không hợp lệ' });
+  const title = String((req.body || {}).title || '').trim(), c = clean((req.body || {}).questions);
+  if (!title || title.length > LIM.title) return res.status(400).json({ err: `Tiêu đề phải có 1–${LIM.title} ký tự` });
+  if (c.err) return res.status(400).json({ err: c.err });
+  const questions = c.qs;
   if (!sb) { const id = String(Date.now()); mem.push({ id, title, questions }); return res.json({ id }); }
   const { data, error } = await sb.from('quizzes').insert({ title, questions }).select('id').single();
   if (error) return res.status(500).json({ err: error.message });
@@ -90,10 +111,21 @@ app.delete('/api/results/:id', auth, async (req, res) => {
   if (sb) await sb.from('results').delete().eq('id', req.params.id);
   res.json({ ok: 1 });
 });
-async function saveResult(g, data) {
-  if (!sb || g.saved) return; g.saved = true;
-  const { error } = await sb.from('results').insert({ title: g.quiz.title || 'Quiz', players: data.full.length, data });
-  if (error) console.error('saveResult:', error.message);
+async function saveResult(g, data, attempt = 1) {
+  if (!sb || g.saved) return;
+  let msg = '';
+  try {
+    const { data: row, error } = await sb.from('results').insert({ title: g.quiz.title || 'Quiz', players: data.full.length, data }).select('id').single();
+    if (error || !row || !row.id) msg = error ? error.message : 'Supabase không trả về bản ghi';
+    else g.saved = true;
+  } catch (e) { msg = String(e.message || e); }
+  if (g.saved) g.saveStatus = { ok: true };
+  else {
+    console.error(`saveResult lần ${attempt} lỗi:`, msg);
+    g.saveStatus = { ok: false, msg, attempt };
+    if (attempt < 3) g.saveRetry = setTimeout(() => saveResult(g, data, attempt + 1), attempt * 10000);
+  }
+  io.to(g.host).emit('saveStatus', g.saveStatus);
 }
 
 // ---------- game ----------
@@ -117,7 +149,7 @@ const checkDone = pin => { const g = games[pin]; if (!g || g.state !== 'question
   const on = plist(g).filter(p => p.online); if (on.length && on.every(p => p.ans)) reveal(pin); };
 function closeGame(pin, silent) {
   const g = games[pin]; if (!g) return;
-  ['timer', 'autoTimer', 'hostGone', 'cleanup'].forEach(k => clearTimeout(g[k]));
+  ['timer', 'autoTimer', 'hostGone', 'cleanup', 'saveRetry'].forEach(k => clearTimeout(g[k]));
   if (!silent) io.to(pin).emit('closed'); delete games[pin];
 }
 function advance(pin) {
@@ -173,17 +205,18 @@ function hostSync(g, s) {
   if (g.state === 'lobby') s.emit('lobby', lobby(g));
   else if (g.state === 'question') { s.emit('question', qFor(g, null, remain(g))); progress(g); }
   else if (g.state === 'reveal') s.emit('reveal', g.lastReveal);
-  else if (g.state === 'end') s.emit('end', g.endHost);
+  else if (g.state === 'end') { s.emit('end', g.endHost); if (g.saveStatus) s.emit('saveStatus', g.saveStatus); }
 }
 
 io.on('connection', s => {
   s.on('host:create', async (o = {}, cb) => {
     if (!validToken(o.token)) return cb({ err: 'Hết phiên đăng nhập, hãy đăng nhập lại' });
     const quiz = await getQuiz(o.id); if (!quiz) return cb({ err: 'Không tìm thấy quiz' });
+    const cq = clean(quiz.questions); if (cq.err) return cb({ err: 'Quiz không hợp lệ — ' + cq.err });
     let pin; do pin = String(Math.floor(100000 + Math.random() * 900000)); while (games[pin]);
     const min = clamp(o.min, 0, 60, 5), wait = Math.max(min, clamp(o.wait, 0, 120, 10));
     const g = games[pin] = { host: s.id, htoken: crypto.randomBytes(12).toString('hex'), created: Date.now(), quiz,
-      questions: o.shuffleQ ? shuf([...quiz.questions]) : quiz.questions, players: {}, state: 'lobby', qi: -1,
+      questions: o.shuffleQ ? shuf([...cq.qs]) : cq.qs, players: {}, state: 'lobby', qi: -1,
       auto: !!o.auto, min, wait, shuffleA: !!o.shuffleA };
     const m = typeof o.bg === 'string' && /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(o.bg);
     if (m) { const buf = Buffer.from(m[2], 'base64'); if (buf.length < 350000) { g.bgBuf = buf; g.bgType = m[1]; } }
@@ -202,7 +235,9 @@ io.on('connection', s => {
     if (!name) return cb({ err: 'Hãy nhập tên' });
     const key = name.toLowerCase(); let p = g.players[key];
     if (p) {
-      if (p.online && p.sid !== s.id && p.token !== token) return cb({ err: 'Tên đã được dùng' });
+      // Chỉ người giữ đúng token mới được tiếp quản. Ngoại lệ: phòng chờ + người cũ đã offline (chưa có điểm để mất).
+      const lobbyFree = g.state === 'lobby' && !p.online;
+      if (p.token !== token && !lobbyFree) return cb({ err: 'Tên đã được dùng. Nếu là bạn, hãy vào lại bằng đúng trình duyệt/thiết bị lúc đầu.' });
       p.sid = s.id; p.online = true;
     } else {
       if (g.state !== 'lobby') return cb({ err: 'Game đã bắt đầu' });
