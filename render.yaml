@@ -6,6 +6,8 @@ services:
     buildCommand: npm install
     startCommand: node server.js
     envVars:
+      - key: HOST_PASS
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
