@@ -13,6 +13,7 @@ button.ghost{background:transparent;border:2px solid #fff}button.sm{width:auto;p
 .row{display:flex;justify-content:space-between;background:#fff;color:#222;border-radius:8px;padding:10px 14px;margin:6px 0}
 .bar{display:inline-block;height:14px;background:#fff;border-radius:7px;vertical-align:middle}.dim{opacity:.35}
 .er{color:#e21b3c;margin-top:6px}.row.me{outline:3px solid #ffd602}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ck{display:block;margin:8px 0}small{display:block;color:#666;margin:6px 0}h2{margin:18px 0 6px}.ok{background:#26890c}.bad{background:#e21b3c}.panel{border-radius:12px;padding:26px;margin-top:30px}
+.mod{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:20;padding:20px}.box{background:#fff;color:#222;border-radius:12px;padding:22px;max-width:360px;width:100%;text-align:center}.box button.ghost{color:#555;border-color:#aaa}input[type=range]{padding:0}body{text-shadow:0 1px 3px #0006}.card,.row,.box{text-shadow:none}
 </style></head><body><div id="net" style="display:none;position:fixed;top:0;left:0;right:0;background:#e21b3c;padding:6px;font-size:.9rem">Mất kết nối, đang kết nối lại…</div><main id="app"></main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
@@ -24,7 +25,7 @@ const h = html => app.innerHTML = html;
 let role = '', timer, cur = null, pass = '', pending = null, pendingName = '';
 
 function home() {
-  role = ''; h(`<h1>QuizBlast</h1>
+  role = ''; gameActive = false; stopMusic(); setBg(''); if ($('snd')) $('snd').remove(); sessionStorage.removeItem('qbp'); h(`<h1>QuizBlast</h1>
   <div class="card"><input id="pin" placeholder="Mã PIN" inputmode="numeric"><input id="nm" placeholder="Tên của bạn" maxlength="20">
   <button onclick="join()">Vào chơi</button><div id="err" class="er"></div></div>
   <button class="ghost" onclick="hostLogin()">Tôi là host / giáo viên</button>`);
@@ -49,8 +50,10 @@ function hostLogin() {
 async function doLogin() { pass = $('pw').value; await hostMenu(true); }
 async function hostMenu(fromLogin) {
   const r = await fetch('/api/quizzes', { headers: { 'x-pass': pass } });
-  if (!r.ok) { if (fromLogin) $('err').textContent = 'Sai mật khẩu'; else hostLogin(); return; }
+  if (!r.ok) { sessionStorage.removeItem('qbp'); if (fromLogin && $('pw')) $('err').textContent = 'Sai mật khẩu'; else hostLogin(); return; }
+  sessionStorage.qbp = pass; stopMusic(); setBg(''); if ($('snd')) $('snd').remove();
   const qs = await r.json(); pending = null;
+  const rs = getRes(), resHtml = `<div class="card"><b>📁 Kết quả đã lưu (trong trình duyệt này)</b>${rs.length ? rs.map(x => `<div class="row" style="margin:6px 0"><span>${esc(x.title)}<br><small>${esc(x.date)} · ${x.full.length} người</small></span><span><button class="sm" onclick="viewRes(${x.id})">Xem</button> <button class="sm" style="background:#e21b3c" onclick="delRes(${x.id})">Xoá</button></span></div>`).join('') : '<small>Chưa có kết quả nào.</small>'}</div>`;
   h(`<h1>Bảng điều khiển host</h1>
   <div class="card"><b>1. Chọn bộ câu hỏi</b><select id="qz">${qs.map(q => `<option value="${esc(q.id)}">${esc(q.title)}</option>`).join('')}</select>
   <b>2. Cài đặt qua câu</b>
@@ -59,12 +62,25 @@ async function hostMenu(fromLogin) {
   <div class="two"><div>Thời gian chờ tự qua (giây)<input id="wt" type="number" value="10" min="0" max="120"></div>
   <div>Tối thiểu trước khi bấm qua được (giây)<input id="mn" type="number" value="5" min="0" max="60"></div></div>
   <small>Bỏ chọn tự động = chỉ qua câu khi host bấm nút (sau thời gian tối thiểu).</small>
+  <b>3. Nhạc nền &amp; hình nền</b>
+  <select id="mu"><option value="vui">🎉 Vui nhộn</option><option value="hoihop">⏱ Hồi hộp</option><option value="thugian">🌿 Thư giãn</option><option value="none">🔇 Không nhạc</option><option value="custom">📁 Tải file nhạc của bạn…</option></select>
+  <input type="file" id="muf" accept="audio/*" style="display:none">
+  <div class="two"><div>Âm lượng<input type="range" id="vol" min="0" max="100" value="50"></div><div><br><button class="sm" onclick="previewMusic()">▶ Nghe thử / dừng</button></div></div>
+  <div>Hình nền (hiện trên cả máy người chơi)<input type="file" id="bgf" accept="image/*" onchange="loadBg(this.files[0])"><small id="bgs"></small></div>
+  <small>Nhạc phát trên máy host (chiếu lên màn hình lớp). File nhạc tự tải lên chỉ dùng cho lần này.</small>
   <button onclick="create()">Tạo phòng</button></div>
+  ${resHtml}
   <div class="card"><b>Nạp câu hỏi mới</b><small>Cột A: câu hỏi · B,C,D,E: đáp án A,B,C,D · F: đáp án đúng (A/B/C/D) · G (tuỳ chọn): số giây</small>
   <input type="file" id="fl" accept=".xlsx,.xls,.csv" onchange="loadFile(this.files[0])">
   <input id="gs" placeholder="hoặc dán link Google Sheet (đã chia sẻ công khai)"><button class="sm" onclick="loadSheet()">Đọc Google Sheet</button>
   <div id="pv"></div><div id="err" class="er"></div></div>
   <button class="ghost" onclick="home()">Thoát</button>`);
+  const st = JSON.parse(localStorage.qb_set || '{}');
+  if (st.music && st.music !== 'custom') $('mu').value = st.music;
+  if (st.vol != null) $('vol').value = st.vol;
+  $('mu').onchange = () => { $('muf').style.display = $('mu').value === 'custom' ? 'block' : 'none'; };
+  $('muf').onchange = e => { if (e.target.files[0]) customUrl = URL.createObjectURL(e.target.files[0]); };
+  bgData = localStorage.qb_bg || ''; refreshBg();
 }
 function toQuestions(rows) {
   const qs = []; let skipped = 0;
@@ -102,18 +118,81 @@ async function save() {
   if (!r.ok) return $('err').textContent = (await r.json()).err; hostMenu();
 }
 function create() {
-  s.emit('host:create', { pass, id: $('qz').value, auto: $('au').checked, shuffleQ: $('sq').checked, shuffleA: $('sa').checked, wait: $('wt').value, min: $('mn').value }, r => {
-    if (r.err) return alert(r.err); role = 'host';
+  const music = $('mu').value, v = $('vol').value / 100, src = musicSrc();
+  try { localStorage.qb_set = JSON.stringify({ music, vol: $('vol').value }); } catch {}
+  curTitle = (($('qz').selectedOptions[0]) || {}).text || 'Quiz';
+  s.emit('host:create', { pass, id: $('qz').value, auto: $('au').checked, shuffleQ: $('sq').checked, shuffleA: $('sa').checked, wait: $('wt').value, min: $('mn').value, bg: bgData }, r => {
+    if (r.err) return alert(r.err); role = 'host'; gameActive = true; muted = false;
+    setBg(bgData); stopMusic(); if (src) startMusic(src, v); soundBtn();
     h(`<h1>Vào bằng PIN</h1><div class="pin">${r.pin}</div><div id="pl" class="big">Chưa có ai</div>
     <button onclick="s.emit('host:next')">Bắt đầu</button>`);
   });
 }
+// ---- âm thanh / hình nền / hiệu ứng / hộp xác nhận / lưu kết quả ----
+const bgm = new Audio(); bgm.loop = true;
+let muted = false, vol = .5, customUrl = '', bgData = '', curTitle = '', gameActive = false;
+function startMusic(src, v) { vol = v; bgm.src = src; bgm.volume = v; bgm.muted = muted; bgm.play().catch(() => {}); }
+function stopMusic() { bgm.pause(); }
+function musicSrc() { const v = $('mu').value; return v === 'none' ? '' : v === 'custom' ? customUrl : `/sounds/${v}.wav`; }
+function previewMusic() { if (!bgm.paused) return stopMusic(); const src = musicSrc(); if (src) startMusic(src, $('vol').value / 100); }
+function applause() { const a = new Audio('/sounds/applause.wav'); a.volume = muted ? 0 : Math.min(1, vol + .4); a.play().catch(() => {}); }
+function soundBtn() {
+  if ($('snd')) return; const b = document.createElement('button'); b.id = 'snd'; b.className = 'sm';
+  b.style.cssText = 'position:fixed;top:8px;right:8px;width:auto;z-index:8;padding:6px 10px'; b.textContent = '🔊';
+  b.onclick = () => { muted = !muted; bgm.muted = muted; b.textContent = muted ? '🔇' : '🔊'; }; document.body.appendChild(b);
+}
+function setBg(u) {
+  const b = document.body.style;
+  b.backgroundImage = u ? `linear-gradient(rgba(0,0,0,.4),rgba(0,0,0,.4)),url("${u}")` : '';
+  b.backgroundSize = 'cover'; b.backgroundPosition = 'center'; b.backgroundAttachment = 'fixed';
+}
+function refreshBg() { $('bgs').innerHTML = bgData ? '✔ Đã chọn hình nền · <a href="#" style="color:#1368ce" onclick="clearBg();return false">xoá</a>' : 'Chưa chọn'; }
+function clearBg() { bgData = ''; localStorage.removeItem('qb_bg'); refreshBg(); }
+async function loadBg(f) {
+  if (!f) return;
+  try {
+    const img = new Image(); img.src = URL.createObjectURL(f); await img.decode();
+    const k = Math.min(1, 1280 / Math.max(img.width, img.height)), cv = document.createElement('canvas');
+    cv.width = img.width * k; cv.height = img.height * k; cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+    let q = .75, u = cv.toDataURL('image/jpeg', q); while (u.length > 500000 && q > .3) { q -= .1; u = cv.toDataURL('image/jpeg', q); }
+    bgData = u; try { localStorage.qb_bg = u; } catch {} refreshBg();
+  } catch { $('bgs').textContent = 'Không đọc được ảnh'; }
+}
+s.on('bg', u => setBg(u));
+function fireworks(ms = 7000) {
+  const cv = document.createElement('canvas'); cv.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9';
+  document.body.appendChild(cv); const x = cv.getContext('2d'); cv.width = innerWidth; cv.height = innerHeight;
+  let ps = [], end = Date.now() + ms, last = 0;
+  const burst = () => { const cx = Math.random() * cv.width, cy = Math.random() * cv.height * .5 + 40, col = `hsl(${Math.random() * 360},100%,60%)`;
+    for (let i = 0; i < 70; i++) { const a = Math.random() * 6.28, v = Math.random() * 5 + 1; ps.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, l: 1, c: col }); } };
+  (function f(t) {
+    x.clearRect(0, 0, cv.width, cv.height);
+    if (Date.now() < end && t - last > 400) { burst(); last = t; }
+    ps = ps.filter(p => p.l > 0);
+    ps.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += .06; p.vx *= .99; p.l -= .012; x.globalAlpha = Math.max(p.l, 0); x.fillStyle = p.c; x.fillRect(p.x, p.y, 3, 3); });
+    if (ps.length || Date.now() < end) requestAnimationFrame(f); else cv.remove();
+  })(0);
+}
+function ask(msg, yes = 'Có', no = 'Không') {
+  return new Promise(r => {
+    const d = document.createElement('div'); d.className = 'mod';
+    d.innerHTML = `<div class="box"><p>${msg}</p><button id="y">${yes}</button><button id="n" class="ghost">${no}</button></div>`;
+    document.body.appendChild(d); d.querySelector('#y').onclick = () => { d.remove(); r(true); }; d.querySelector('#n').onclick = () => { d.remove(); r(false); };
+  });
+}
+const RK = 'qb_results';
+const getRes = () => { try { return JSON.parse(localStorage[RK] || '[]'); } catch { return []; } };
+const putRes = a => { try { localStorage[RK] = JSON.stringify(a); } catch {} };
+function saveRes(d) { putRes([{ id: Date.now(), title: curTitle, date: new Date().toLocaleString('vi-VN'), top: d.top, full: d.full, qs: d.qs }, ...getRes()].slice(0, 15)); }
+function viewRes(id) { const r = getRes().find(x => x.id === id); if (r) { lastEnd = r; showEnd(r, true, r); } }
+async function delRes(id) { if (await ask('Xoá kết quả này? Không thể khôi phục.', 'Xoá', 'Giữ lại')) { putRes(getRes().filter(x => x.id !== id)); hostMenu(); } }
+window.addEventListener('beforeunload', e => { if (role === 'host' && gameActive) { e.preventDefault(); e.returnValue = ''; } });
 let lobbyList = [];
 s.on('lobby', n => {
   lobbyList = n; if (!$('pl')) return;
   $('pl').innerHTML = n.length ? `<div>${n.length} người chơi</div>` + n.map((x, i) => `<span class="chip ${x.online ? '' : 'dim'}">${esc(x.name)} <a href="#" style="color:#fff" onclick="kick(${i});return false">✕</a></span>`).join('') : 'Chưa có ai';
 });
-function kick(i) { if (lobbyList[i] && confirm('Đuổi ' + lobbyList[i].name + '?')) s.emit('host:kick', lobbyList[i].key); }
+async function kick(i) { if (lobbyList[i] && await ask('Đuổi ' + esc(lobbyList[i].name) + ' khỏi phòng?')) s.emit('host:kick', lobbyList[i].key); }
 s.on('kicked', () => { sessionStorage.removeItem('qb'); role = ''; alert('Bạn đã bị host mời ra khỏi phòng'); home(); });
 s.on('sent', () => h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`));
 s.on('connect', () => { $('net').style.display = 'none'; const v = JSON.parse(sessionStorage.qb || 'null'); if (role === 'player' && v) doJoin(v.pin, v.name, v.token, true); });
@@ -150,9 +229,17 @@ s.on('result', r => {
   <h2>Bảng xếp hạng</h2>${board(r.top, r.name)}`);
 });
 let lastEnd = null;
+function showEnd(d, saved, meta) {
+  h(`<h1>🏆 Kết quả</h1>${meta ? `<div>${esc(meta.title)} · ${esc(meta.date)}</div>` : ''}${board(d.full || d.top)}` +
+    (d.full ? `<button onclick="csv()">⬇ Tải bảng điểm (CSV)</button><button class="ghost" onclick="leaveEnd(${saved})">Về trang host</button>` : `<button onclick="location.reload()">Chơi lại</button>`));
+}
+async function leaveEnd(saved) {
+  if (saved || await ask('Rời khỏi trang kết quả?<br><small>Kết quả đã được lưu trong trình duyệt. Xem lại ở mục "Kết quả đã lưu" trên trang host.</small>', 'Có, rời đi', 'Không, ở lại')) hostMenu();
+}
 s.on('end', d => {
-  clearInterval(timer); lastEnd = d; sessionStorage.removeItem('qb');
-  h(`<h1>🏆 Kết quả</h1>${board(d.top)}` + (d.full ? `<button onclick="csv()">⬇ Tải bảng điểm (CSV)</button><button class="ghost" onclick="hostMenu()">Về trang host</button>` : `<button onclick="location.reload()">Chơi lại</button>`));
+  clearInterval(timer); lastEnd = d; sessionStorage.removeItem('qb'); gameActive = false; stopMusic();
+  if (d.full) saveRes(d);
+  showEnd(d, false); fireworks(); applause();
 });
 function csv() {
   const d = lastEnd, e = v => { v = String(v); if (/^[=+\-@]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
@@ -164,5 +251,7 @@ function csv() {
 }
 s.on('closed', () => { sessionStorage.removeItem('qb'); role = ''; alert('Host đã thoát phòng'); home(); });
 const saved = JSON.parse(sessionStorage.qb || 'null');
-if (saved) doJoin(saved.pin, saved.name, saved.token, true); else home();
+if (saved) doJoin(saved.pin, saved.name, saved.token, true);
+else if (sessionStorage.qbp) { pass = sessionStorage.qbp; hostMenu(true); }
+else home();
 </script></body></html>
