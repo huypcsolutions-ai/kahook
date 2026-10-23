@@ -1,5 +1,7 @@
 <!doctype html><html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>QuizBlast</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#46178f;color:#fff;min-height:100vh;display:flex;justify-content:center}
 main{width:100%;max-width:760px;padding:20px;text-align:center}h1{font-size:2.4rem;margin:.6em 0}
@@ -37,69 +39,48 @@ input,select,textarea{border-radius:12px;font-family:inherit}
 @media(max-width:480px){main{padding:12px}.grid button,.grid .panel{height:92px;font-size:1.02rem}.big{font-size:1.35rem}.brand{margin:8px 8px 0}.brand .bt{font-size:1.1rem}.brand img{max-height:48px;max-width:90px}.row{padding:8px 10px}}
 @media(min-width:1000px){#wrap{max-width:980px}main{max-width:none}.grid button,.grid .panel{height:140px;font-size:1.5rem}.big{font-size:2rem}}
 
-
-/* ===== QuizBlast UI/UX polish v2: visual-only overrides, game logic unchanged ===== */
-:root{color-scheme:light;--qb-ink:#1c1633;--qb-muted:#6f6882;--qb-surface:#fff;--qb-line:#e9e4f4;--qb-accent:#ffd629;--qb-purple:#5121a8;--qb-shadow:0 18px 48px rgba(19,7,48,.22)}
-html{min-height:100%;background:#241047;scroll-behavior:smooth}
-body{position:relative;isolation:isolate;min-height:100vh;padding:0 0 36px;background:radial-gradient(ellipse at 12% 8%,rgba(255,214,41,.15),transparent 28%),radial-gradient(ellipse at 90% 25%,rgba(75,192,255,.14),transparent 30%),linear-gradient(145deg,#251044 0%,#51209a 48%,#28104e 100%);background-attachment:fixed;color:#fff;text-shadow:none;line-height:1.5;overflow-x:hidden}
-body:before,body:after{content:"";position:fixed;z-index:-1;pointer-events:none;border:1px solid #ffffff12;border-radius:32px;transform:rotate(24deg)}
-body:before{width:280px;height:280px;left:-160px;top:28%;box-shadow:0 0 0 28px #ffffff06,0 0 0 56px #ffffff04}
-body:after{width:360px;height:360px;right:-230px;top:58%;box-shadow:0 0 0 32px #ffffff05}
-#wrap{position:relative;width:min(100%,1120px);max-width:1120px;padding:0 20px}
-main{width:100%;max-width:100%;padding:clamp(16px,3vw,34px) 0 28px;text-align:center}
-h1{font-size:clamp(2rem,5vw,3.25rem);font-weight:950;line-height:1.08;letter-spacing:-.045em;margin:22px 0 20px;text-wrap:balance;text-shadow:0 4px 18px #16052b55}
-h2{font-size:clamp(1.2rem,3vw,1.65rem);font-weight:850;letter-spacing:-.025em;margin:24px 0 10px}
-p{line-height:1.6}
-.brand{position:relative;display:flex;gap:16px;justify-content:flex-start;margin:18px 0 0;padding:14px 20px;background:linear-gradient(110deg,#ffffff18,#ffffff09);border:1px solid #ffffff20;border-bottom:4px solid var(--qb-accent);border-radius:22px;box-shadow:0 12px 30px #15052b25;backdrop-filter:blur(14px)}
-.brand img{max-height:58px;max-width:120px;border-radius:10px}.brand .bt{font-size:clamp(1.1rem,3vw,1.55rem);font-weight:900;letter-spacing:-.025em}.brand .bs{font-size:.92rem;color:#f1eaff;line-height:1.45}
-.card{position:relative;background:var(--qb-surface);color:var(--qb-ink);padding:clamp(18px,3vw,28px);margin:18px 0;border:1px solid #ffffffb8;border-radius:24px;box-shadow:var(--qb-shadow);text-align:left;overflow:hidden}
-.card>b{display:block;font-size:1rem;font-weight:850;letter-spacing:-.01em;margin:14px 0 8px;color:#30204f}.card>b:first-child{margin-top:0}
-.card small,small{font-size:.82rem;line-height:1.5;color:var(--qb-muted)}
-input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),textarea,select{display:block;width:100%;min-width:0;min-height:48px;padding:12px 14px;margin:8px 0 12px;background:#fbfaff;color:var(--qb-ink);border:1.5px solid #dcd5eb;border-radius:13px;font:inherit;box-shadow:inset 0 1px 2px #24104708;transition:border-color .18s,box-shadow .18s,background .18s}
-input::placeholder,textarea::placeholder{color:#958ca8}
-input:focus,textarea:focus,select:focus{outline:none;border-color:#7a45df!important;background:#fff!important;box-shadow:0 0 0 4px #7a45df20!important}
-input[type=checkbox],input[type=radio]{width:18px;height:18px;accent-color:#6b35cb;vertical-align:middle;margin:0 8px 0 0}
-input[type=range]{width:100%;accent-color:#6b35cb;cursor:pointer}
-input[type=color]{width:100%;min-height:46px;border:1px solid var(--qb-line);border-radius:12px;background:#fff;cursor:pointer}
-button{position:relative;min-height:48px;width:100%;margin:7px 0;padding:13px 18px;border:1px solid #ffffff20;border-radius:14px;background:linear-gradient(135deg,#7141d8,#5121a8);color:#fff;font-size:1rem;font-weight:800;letter-spacing:.005em;line-height:1.25;box-shadow:0 5px 0 #32106f,0 9px 20px #31106520;transition:transform .16s ease,box-shadow .16s ease,filter .16s ease;touch-action:manipulation}
-button:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 6px 0 #32106f,0 13px 24px #31106530}
-button:active:not(:disabled){transform:translateY(3px);box-shadow:0 2px 0 #32106f}
-button:focus-visible,a:focus-visible{outline:3px solid #ffd629;outline-offset:3px}
-button:disabled{filter:grayscale(.12);opacity:.58;box-shadow:none;transform:none}
-button.ghost{background:#fff;color:#5b2db0;border:1.5px solid #d9c9f4;box-shadow:0 3px 0 #e7def5}
-button.ghost:hover:not(:disabled){background:#f7f2ff;box-shadow:0 4px 0 #e7def5}
-button.sm{min-height:36px;width:auto;padding:8px 12px;margin:3px;font-size:.88rem;border-radius:10px;box-shadow:0 3px 0 #32106f}
-.card button.ghost{color:#5b2db0;border-color:#d9c9f4}
-.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.two>div{min-width:0;color:#403456;font-size:.92rem;font-weight:700}
-.ck{display:flex;align-items:flex-start;gap:4px;margin:12px 0;color:#403456;font-size:.95rem;line-height:1.45}.ck input{flex:0 0 auto;margin-top:2px}
-.pin{display:flex;align-items:center;justify-content:center;width:fit-content;max-width:100%;margin:18px auto;padding:14px clamp(20px,5vw,44px);border:1px solid #fff;border-radius:24px;background:linear-gradient(145deg,#fff,#f3eaff);color:#5121a8;font-size:clamp(2.5rem,10vw,5.5rem);font-weight:1000;letter-spacing:.12em;line-height:1.1;overflow-wrap:anywhere;box-shadow:0 8px 0 #d7c5f0,0 20px 45px #16052b35;text-shadow:none}
-.big{font-size:clamp(1.15rem,3vw,1.65rem);font-weight:800;line-height:1.35;margin:18px 0;overflow-wrap:anywhere;text-wrap:balance}
-.chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;margin:5px 4px;padding:8px 13px;border:1px solid #ffffff3b;border-radius:999px;background:#ffffff18;color:#fff;font-size:.9rem;font-weight:750;overflow-wrap:anywhere;backdrop-filter:blur(8px)}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0}
-.grid button,.grid .panel{display:flex;align-items:center;justify-content:center;gap:10px;min-width:0;min-height:clamp(100px,15vw,165px);height:auto;margin:0;padding:clamp(14px,2vw,24px);border:1px solid #ffffff45;border-radius:20px;color:#fff;font-size:clamp(1rem,2.2vw,1.45rem);font-weight:900;line-height:1.3;overflow-wrap:anywhere;word-break:normal;box-shadow:0 6px 0 #16052b45,0 12px 24px #16052b20;text-shadow:0 1px 2px #0002}
-.grid button:hover:not(:disabled){transform:translateY(-2px) scale(1.01);box-shadow:0 8px 0 #16052b45,0 16px 28px #16052b28}
-.grid button:active:not(:disabled){transform:translateY(3px);box-shadow:0 2px 0 #16052b45}
-.panel{border:1px solid #ffffff30;border-radius:22px;padding:clamp(20px,4vw,34px);margin:18px 0;box-shadow:0 16px 38px #15052b25;animation:qbEnter .32s cubic-bezier(.2,.8,.2,1) both}
-.panel.ok{background:linear-gradient(135deg,#20a66a,#087b59);color:#fff}.panel.bad{background:linear-gradient(135deg,#ef476f,#b51d53);color:#fff}
-.row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;margin:8px 0;padding:12px 16px;border:1px solid #e8e0f3;border-radius:14px;background:#fff;color:#2b2140;box-shadow:0 3px 10px #26104708;overflow-wrap:anywhere}
-.row>span{min-width:0}.row b{font-variant-numeric:tabular-nums}.row.me{outline:3px solid #ffd629;border-color:#ffd629;background:#fffbed}
-.row small{margin-top:3px}.dim{opacity:.42;filter:saturate(.65)}
-.tbar{height:12px;margin:14px 0 20px;background:#ffffff30;border:1px solid #ffffff24;border-radius:999px;overflow:hidden;box-shadow:inset 0 2px 5px #16052b20}.tbar i{border-radius:999px;background:linear-gradient(90deg,#3de7a2,#ffd629 65%,#ff5577)}
-.bar{height:12px;border-radius:999px;box-shadow:0 2px 5px #0002}
-.pod{align-items:flex-end;gap:12px;margin:28px auto 22px;max-width:760px}.pod>div{flex:1;min-width:0;max-width:220px;padding:0 4px}.pod .nm{font-size:clamp(.78rem,2vw,1rem);line-height:1.25;overflow-wrap:anywhere;color:#fff}.pod .pt{font-size:1.05rem;font-variant-numeric:tabular-nums;color:#f4eaff}.pod .bar2{height:auto;min-height:76px;padding:14px 4px 18px;border:1px solid #ffffff40;border-bottom:0;border-radius:18px 18px 0 0;font-size:clamp(1.5rem,4vw,2.5rem);box-shadow:inset 0 -5px 0 #ffffff30,0 8px 22px #17072a25}
-.pod .p1 .bar2{height:clamp(108px,18vw,160px);background:linear-gradient(150deg,#ffe77a,#e5a900)}.pod .p2 .bar2{height:clamp(84px,14vw,124px);background:linear-gradient(150deg,#f0f3f9,#9aa5b7)}.pod .p3 .bar2{height:clamp(68px,11vw,96px);background:linear-gradient(150deg,#ffc18a,#b96936)}
-.pod .me .nm{color:#ffe15a;text-decoration:none}.pod .me{filter:drop-shadow(0 0 12px #ffd62930)}
-#net{z-index:1000!important;padding:10px 16px!important;text-align:center;font-weight:800;box-shadow:0 5px 20px #0003;backdrop-filter:blur(10px)}
-.mod{background:#160a2dcc;backdrop-filter:blur(8px)}.box{max-width:420px;padding:26px;border:1px solid #ffffff;border-radius:24px;box-shadow:0 24px 70px #0005}.box p{font-size:1.05rem;font-weight:650;line-height:1.55}.box button.ghost{color:#5b2db0;border-color:#d9c9f4}
-.pvw{z-index:1100;background-color:#351166;padding:clamp(12px,3vw,28px);backdrop-filter:blur(10px)}
-.er{color:#c0264b;font-weight:700}.card .er{margin-top:8px}
-#snd{min-height:42px;padding:8px 12px;border-radius:999px;background:#ffffffed;color:#5121a8;border:1px solid #ffffff;box-shadow:0 5px 20px #16052b35;backdrop-filter:blur(8px)}
-@keyframes qbEnter{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
-@media(max-width:600px){#wrap{padding:0 12px}main{padding:16px 0 22px}h1{margin:18px 0 16px}.brand{margin-top:10px;padding:11px 13px;border-radius:17px}.brand img{max-width:76px;max-height:44px}.brand .bs{font-size:.82rem}.card{padding:17px;margin:13px 0;border-radius:19px}.two{grid-template-columns:minmax(0,1fr);gap:4px}.grid{gap:9px;margin:16px 0}.grid button,.grid .panel{min-height:108px;padding:12px 9px;border-radius:15px;font-size:1rem}.pin{letter-spacing:.08em;border-radius:18px}.pod{gap:5px;margin:22px 0 16px}.pod>div{padding:0 2px}.pod .nm{font-size:.75rem}.pod .pt{font-size:.88rem}.row{padding:10px 11px}.row button.sm{padding:7px 9px}.card .row{align-items:center}.card .row>span{overflow-wrap:anywhere}.pvw .grid{gap:8px}}
-@media(max-width:360px){#wrap{padding:0 8px}.grid button,.grid .panel{min-height:92px;font-size:.9rem}.pin{font-size:2.25rem}.pod .nm{font-size:.68rem}.pod .bar2{padding-left:1px;padding-right:1px}}
-@media(min-width:900px){main{padding-top:30px}.card{padding:30px}.grid{gap:18px}.grid button,.grid .panel{min-height:150px}}
-@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
-
+/* ===== Giao diện v3: vui vẻ - chuyên nghiệp ===== */
+:root{--p:#46178f;--y:#ffd602;--pink:#ff4d8d;--teal:#26d0ce}
+body{font-family:"Nunito","Segoe UI",system-ui,sans-serif;font-weight:600}
+h1,h2,.big,.pin,.logo,button,.brand .bt,.pod .nm{font-family:"Baloo 2","Nunito","Segoe UI",system-ui,sans-serif}
+body::before,body::after{content:"";position:fixed;z-index:-1;border-radius:50%;filter:blur(70px);opacity:.32;pointer-events:none;will-change:transform}
+body::before{width:420px;height:420px;background:var(--pink);left:-140px;top:8%;animation:float 14s ease-in-out infinite}
+body::after{width:480px;height:480px;background:var(--teal);right:-170px;bottom:-90px;animation:float 18s ease-in-out infinite reverse}
+@keyframes float{50%{transform:translate(40px,-50px) scale(1.12)}}
+.logo{font-size:clamp(2.6rem,11vw,4rem);font-weight:800;margin:.5em 0 0;letter-spacing:1px;text-shadow:0 4px 0 #0005}
+.logo span{color:var(--y)}.logo .bolt{display:inline-block;animation:zap 2.4s ease-in-out infinite}
+@keyframes zap{0%,100%{transform:rotate(-8deg) scale(1)}50%{transform:rotate(8deg) scale(1.18)}}
+.sub{opacity:.9;margin:0 0 14px;font-weight:700;letter-spacing:.5px}
+.emoji{font-size:4.5rem;line-height:1;margin-top:26px;animation:bounce 1.6s ease-in-out infinite}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
+.pulse{animation:pulse 1.6s ease-in-out infinite}@keyframes pulse{50%{opacity:.45}}
+.card{background:#fffffff2;border-radius:20px;padding:20px}
+.card>b{display:block;font-family:"Baloo 2",sans-serif;font-size:1.15rem;color:var(--p);margin:12px 0 4px}.card>b:first-child{margin-top:0}
+.card input,.card select,.card textarea{border:2px solid #e3dcf3;background:#faf8ff}.card input:focus,.card select:focus{outline:none;border-color:#7b2ff7;box-shadow:0 0 0 4px #7b2ff733}
+#pin{font-size:1.6rem;text-align:center;letter-spacing:.3em;font-weight:800}
+button{background:linear-gradient(#2a7de1,#1368ce);font-weight:800;letter-spacing:.3px}
+button.cta{background:linear-gradient(#ffe24d,#ffc400);color:#3a1670;font-size:1.25rem}
+button.ghost{background:#ffffff14;backdrop-filter:blur(4px)}
+.pin{background:linear-gradient(#fff,#efe7ff);color:var(--p);border:4px solid var(--y);animation:glow 2.4s ease-in-out infinite}
+@keyframes glow{50%{box-shadow:0 8px 0 #0003,0 0 36px #ffd60288}}
+.chip{animation:popin .35s cubic-bezier(.3,1.6,.5,1) both;padding:7px 16px;font-size:1.05rem}
+@keyframes popin{0%{transform:scale(0)}100%{transform:scale(1)}}
+.grid button,.grid .panel{display:flex;align-items:center;justify-content:flex-start;gap:12px;text-align:left;padding:14px 18px;background-image:linear-gradient(#ffffff2e,#00000026)!important;border:0}
+.grid button:hover:not(:disabled){transform:translateY(-3px) scale(1.02)}
+.qcard{background:#fff;color:#2a1250;border-radius:20px;padding:18px 16px;margin:12px 0;font-family:"Baloo 2","Nunito",sans-serif;font-weight:800;font-size:clamp(1.3rem,4.6vw,2rem);line-height:1.25;box-shadow:0 8px 0 #0003,0 14px 30px #0004;text-shadow:none;animation:popin .4s ease-out both}
+.meta{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.pill{background:#0006;border-radius:30px;padding:5px 16px;font-weight:800;font-size:1.05rem}.pill.t{background:var(--y);color:#3a1670;min-width:70px}
+.okbar{background:linear-gradient(#2fc45a,#1f9d44);border-radius:14px;padding:12px 14px;font-family:"Baloo 2",sans-serif;font-weight:800;font-size:1.3rem;margin:12px 0;box-shadow:0 5px 0 #0003}
+.row{border-radius:12px;font-weight:800;box-shadow:0 3px 0 #0002;animation:slidein .35s ease-out both}
+@keyframes slidein{0%{transform:translateX(-18px);opacity:0}100%{transform:none;opacity:1}}
+.panel.ok{background:linear-gradient(#2fc45a,#1a8a3a)}.panel.bad{background:linear-gradient(#f0405a,#b8122e)}
+.panel.ok h1{animation:bounce .9s ease-in-out 3}.panel.bad{animation:shake .5s ease-out}
+@keyframes shake{20%,60%{transform:translateX(-10px)}40%,80%{transform:translateX(10px)}}
+.pod .bar2{animation:rise .9s cubic-bezier(.2,1.2,.4,1) both;transform-origin:bottom}@keyframes rise{0%{transform:scaleY(0)}100%{transform:scaleY(1)}}
+.pod .p1 .nm{font-size:1.15rem}
+.er{font-weight:700}
+@media(max-width:480px){body::before,body::after{animation:none}.qcard{font-size:1.25rem}#pin{font-size:1.4rem}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style></head><body><div id="net" style="display:none;position:fixed;top:0;left:0;right:0;background:#e21b3c;padding:6px;font-size:.9rem">Mất kết nối, đang kết nối lại…</div><div id="wrap"><div id="brand"></div><main id="app"></main></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
@@ -111,9 +92,9 @@ const h = html => app.innerHTML = html;
 let role = '', timer, cur = null, tok = '', pending = null, pendingName = '';
 
 function home() {
-  role = ''; gameActive = false; stopMusic(); setBg(''); setBrand(null); if ($('snd')) $('snd').remove(); sessionStorage.removeItem('qbp'); sessionStorage.removeItem('qbh'); h(`<h1>QuizBlast</h1>
+  role = ''; gameActive = false; stopMusic(); setBg(''); setBrand(null); if ($('snd')) $('snd').remove(); sessionStorage.removeItem('qbp'); sessionStorage.removeItem('qbh'); h(`<div class="logo"><span class="bolt">⚡</span>Quiz<span>Blast</span></div><div class="sub">Đố vui · Thi đua · Bứt phá</div>
   <div class="card"><input id="pin" placeholder="Mã PIN" inputmode="numeric"><input id="nm" placeholder="Tên của bạn" maxlength="20">
-  <button onclick="join()">Vào chơi</button><div id="err" class="er"></div></div>
+  <button class="cta" onclick="join()">🚀 Vào chơi</button><div id="err" class="er"></div></div>
   <button class="ghost" onclick="hostLogin()">Tôi là host / giáo viên</button>`);
 }
 function join() { doJoin($('pin').value.trim(), $('nm').value, '', false); }
@@ -125,7 +106,7 @@ function doJoin(pin, name, token, silent) {
       return;
     }
     role = 'player'; localStorage.qb = JSON.stringify({ pin, name: r.name, token: r.token, t: Date.now() });
-    if (r.state === 'lobby') h(`<h1>Đã vào phòng!</h1><div class="big">Chờ host bắt đầu…</div>`);
+    if (r.state === 'lobby') h(`<div class="emoji">🎮</div><h1>Bạn đã vào phòng!</h1><div class="big pulse">Chờ host bắt đầu…</div><div class="sub">Nhìn lên màn hình xem tên mình nhé 👀</div>`);
   });
 }
 function hostLogin() {
@@ -220,7 +201,7 @@ async function save() {
   if (!r.ok) return $('err').textContent = (await r.json()).err; hostMenu();
 }
 function hostLobby(pin) {
-  h(`<h1>Vào bằng PIN</h1><div class="pin">${pin}</div><div id="pl" class="big">Chưa có ai</div><button onclick="startGame()">Bắt đầu</button>`);
+  h(`<div class="sub" style="margin-top:18px">Mở trang này trên điện thoại và nhập mã PIN</div><div class="pin">${pin}</div><div id="pl" class="big">Chưa có ai</div><button onclick="startGame()">Bắt đầu</button>`);
 }
 function startGame() { s.emit('host:start', r => { if (r && r.err) alert(r.err); }); }
 function hostRejoin(v, silent) {
@@ -361,13 +342,13 @@ s.on('disconnect', () => { if (role) $('net').style.display = 'block'; });
 let qEnd = 0;
 function drawQ(note) {
   clearInterval(timer); const q = cur;
-  const head = `<div>Câu ${q.i}/${q.total} · <b id="tm">${Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0)}</b>s</div><div class="tbar"><i id="tb" style="width:100%"></i></div><div class="big">${esc(q.q)}</div>`;
+  const head = `<div class="meta"><span class="pill">Câu ${q.i}/${q.total}</span><span class="pill t">⏱ <b id="tm">${Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0)}</b>s</span></div><div class="tbar"><i id="tb" style="width:100%"></i></div><div class="qcard">${esc(q.q)}</div>`;
   if (role === 'host') h(head + `<div class="grid">${q.options.map((o, i) => `<div class="panel" style="margin:0;background:${COL[i]}">${SYM[i]} ${esc(o)}</div>`).join('')}</div><div id="an" class="big">0 đã trả lời</div>`);
   else if (role === 'player') h(head + (note ? `<div class="er" style="color:#ffd602">${esc(note)}</div>` : '') + `<div class="grid">${q.options.map((o, i) => `<button style="background:${COL[i]}" onclick="ans(${i})">${SYM[i]} ${esc(o)}</button>`).join('')}</div>`);
   timer = setInterval(() => { const t = Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0); if ($('tm')) $('tm').textContent = t; if ($('tb')) $('tb').style.width = Math.max(0, (qEnd - Date.now()) / (q.time * 1000) * 100) + '%'; if (t <= 0) clearInterval(timer); }, 500);
 }
 s.on('question', q => { cur = q; qEnd = Date.now() + q.time * 1000; drawQ(); });
-function showSent() { h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`); }
+function showSent() { h(`<div class="emoji">✅</div><h1>Đã gửi!</h1><div class="big pulse">Chờ mọi người…</div>`); }
 function ans(i) {
   document.querySelectorAll('.grid button').forEach(b => b.disabled = true);
   let done = false;
@@ -384,7 +365,7 @@ const board = (t, me) => {
 };
 s.on('reveal', d => {
   clearInterval(timer); const mx = Math.max(...d.counts, 1), t0 = Date.now();
-  h(`<div class="big">Đáp án đúng: ${SYM[d.correct]} ${esc(d.options[d.correct])}</div>
+  h(`<div class="okbar">✔ Đáp án đúng: ${SYM[d.correct]} ${esc(d.options[d.correct])}</div>
   ${d.options.map((o, i) => `<div class="${i === d.correct ? '' : 'dim'}" style="text-align:left;margin:8px 0">${SYM[i]} ${esc(o)} <span class="bar" style="width:${d.counts[i] / mx * 60}%;background:${COL[i]}"></span> ${d.counts[i]}</div>`).join('')}
   <h2>Bảng xếp hạng</h2>${board(d.top)}<button id="nx" disabled></button><div id="au2" class="big" style="color:#ffd602"></div>`);
   const label = d.last ? 'Kết thúc' : 'Câu tiếp theo';
