@@ -130,6 +130,10 @@ async function saveResult(g, data, attempt = 1) {
 
 // ---------- game ----------
 const games = {};
+app.get('/logo/:pin', (req, res) => {
+  const g = games[req.params.pin]; if (!g || !g.logoBuf) return res.status(404).end();
+  res.set({ 'Content-Type': g.logoType, 'Cache-Control': 'public, max-age=7200' }).send(g.logoBuf);
+});
 app.get('/bg/:pin', (req, res) => {
   const g = games[req.params.pin]; if (!g || !g.bgBuf) return res.status(404).end();
   res.set({ 'Content-Type': g.bgType, 'Cache-Control': 'public, max-age=7200' }).send(g.bgBuf);
@@ -138,6 +142,7 @@ const clamp = (v, a, b, d) => { v = Number(v); return Number.isFinite(v) ? Math.
 const shuf = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const plist = g => Object.values(g.players);
 const top = (g, n) => plist(g).sort((a, b) => b.score - a.score).slice(0, n).map(p => ({ name: p.name, score: p.score }));
+const brandFor = g => (g.brand && (g.brand.title || g.brand.sub || g.logoBuf)) ? { ...g.brand, logo: g.logoBuf ? `/logo/${g.pin}?v=${g.created}` : '' } : null;
 const lobby = g => plist(g).map(p => ({ key: p.key, name: p.name, online: p.online }));
 const qFor = (g, p, time) => {
   const q = g.questions[g.qi], perm = p ? p.perm : q.options.map((_, i) => i);
@@ -189,7 +194,8 @@ function reveal(pin) {
   const t5 = top(g, 5);
   list.sort((a, b) => b.score - a.score).forEach((p, i) => {
     p.lastResult = { name: p.name, answered: !!p.ans, correct: !!p.ans && p.ans.idx === q.correct, correctText: q.options[q.correct],
-      gained: p.gained, score: p.score, rank: i + 1, total: list.length, top: t5 };
+      gained: p.gained, score: p.score, rank: i + 1, total: list.length, top: t5,
+      last: g.qi === g.questions.length - 1, left: g.auto ? g.wait : null };
     io.to(p.sid).emit('result', p.lastResult);
   });
   g.lastReveal = { correct: q.correct, counts, options: q.options, top: t5, last: g.qi === g.questions.length - 1, auto: g.auto, min: g.min, wait: g.wait };
@@ -198,10 +204,11 @@ function reveal(pin) {
 }
 function sync(g, p, s) {
   if (g.state === 'question') { s.emit('question', qFor(g, p, remain(g))); if (p.ans) s.emit('sent'); }
-  else if (g.state === 'reveal' && p.lastResult) s.emit('result', p.lastResult);
+  else if (g.state === 'reveal' && p.lastResult) s.emit('result', { ...p.lastResult, left: g.auto ? Math.max(0, Math.ceil(g.wait - (Date.now() - g.revealAt) / 1000)) : null });
   else if (g.state === 'end') s.emit('end', { top: g.finalTop });
 }
 function hostSync(g, s) {
+  const bf = brandFor(g); if (bf) s.emit('brand', bf);
   if (g.state === 'lobby') s.emit('lobby', lobby(g));
   else if (g.state === 'question') { s.emit('question', qFor(g, null, remain(g))); progress(g); }
   else if (g.state === 'reveal') s.emit('reveal', g.lastReveal);
@@ -215,11 +222,15 @@ io.on('connection', s => {
     const cq = clean(quiz.questions); if (cq.err) return cb({ err: 'Quiz không hợp lệ — ' + cq.err });
     let pin; do pin = String(Math.floor(100000 + Math.random() * 900000)); while (games[pin]);
     const min = clamp(o.min, 0, 60, 5), wait = Math.max(min, clamp(o.wait, 0, 120, 10));
-    const g = games[pin] = { host: s.id, htoken: crypto.randomBytes(12).toString('hex'), created: Date.now(), quiz,
+    const g = games[pin] = { pin, host: s.id, htoken: crypto.randomBytes(12).toString('hex'), created: Date.now(), quiz,
       questions: o.shuffleQ ? shuf([...cq.qs]) : cq.qs, players: {}, state: 'lobby', qi: -1,
       auto: !!o.auto, min, wait, shuffleA: !!o.shuffleA };
     const m = typeof o.bg === 'string' && /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(o.bg);
     if (m) { const buf = Buffer.from(m[2], 'base64'); if (buf.length < 350000) { g.bgBuf = buf; g.bgType = m[1]; } }
+    const b = o.brand || {};
+    g.brand = { title: String(b.title || '').slice(0, 80), sub: String(b.sub || '').slice(0, 120), color: /^#[0-9a-f]{6}$/i.test(b.color || '') ? b.color : '#ffd602' };
+    const lm = typeof b.logo === 'string' && /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(b.logo);
+    if (lm) { const buf = Buffer.from(lm[2], 'base64'); if (buf.length < 200000) { g.logoBuf = buf; g.logoType = lm[1]; } }
     s.join(pin); s.data.pin = pin; cb({ pin, htoken: g.htoken });
   });
   // Host vào lại sau khi rớt mạng / refresh
@@ -247,6 +258,7 @@ io.on('connection', s => {
     s.join(pin); s.data.pin = pin; s.data.key = key;
     io.to(g.host).emit('lobby', lobby(g));
     cb({ ok: 1, token: p.token, name: p.name, state: g.state });
+    const bf = brandFor(g); if (bf) s.emit('brand', bf);
     if (g.bgBuf) s.emit('bg', `/bg/${pin}?v=${g.created}`);
     if (g.state !== 'lobby') { sync(g, p, s); progress(g); }
   });
