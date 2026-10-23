@@ -1,1 +1,302 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>QuizBlast</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#46178f;color:#fff;min-height:100vh;display:flex;justify-content:center}
+main{width:100%;max-width:760px;padding:20px;text-align:center}h1{font-size:2.4rem;margin:.6em 0}
+.card{background:#fff;color:#222;border-radius:12px;padding:18px;margin:12px 0;text-align:left}
+input,textarea,select{width:100%;padding:12px;margin:6px 0;border:2px solid #ccc;border-radius:8px;font-size:1rem}
+button{background:#1368ce;color:#fff;border:0;border-radius:8px;padding:14px 20px;font-size:1.05rem;font-weight:700;cursor:pointer;margin:6px 0;width:100%}
+button.ghost{background:transparent;border:2px solid #fff}button.sm{width:auto;padding:8px 14px}
+.pin{font-size:4rem;font-weight:900;letter-spacing:.15em;background:#fff;color:#46178f;border-radius:12px;padding:10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.grid button{height:110px;font-size:1.2rem;margin:0}
+.big{font-size:1.6rem;font-weight:700;margin:16px 0}.chip{display:inline-block;background:#fff3;border-radius:20px;padding:6px 14px;margin:4px}
+.row{display:flex;justify-content:space-between;background:#fff;color:#222;border-radius:8px;padding:10px 14px;margin:6px 0}
+.bar{display:inline-block;height:14px;background:#fff;border-radius:7px;vertical-align:middle}.dim{opacity:.35}
+.er{color:#e21b3c;margin-top:6px}.row.me{outline:3px solid #ffd602}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ck{display:block;margin:8px 0}small{display:block;color:#666;margin:6px 0}h2{margin:18px 0 6px}.ok{background:#26890c}.bad{background:#e21b3c}.panel{border-radius:12px;padding:26px;margin-top:30px}
+.mod{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:20;padding:20px}.box{background:#fff;color:#222;border-radius:12px;padding:22px;max-width:360px;width:100%;text-align:center}.box button.ghost{color:#555;border-color:#aaa}input[type=range]{padding:0}body{text-shadow:0 1px 3px #0006}.card,.row,.box{text-shadow:none}
+</style></head><body><div id="net" style="display:none;position:fixed;top:0;left:0;right:0;background:#e21b3c;padding:6px;font-size:.9rem">Mất kết nối, đang kết nối lại…</div><main id="app"></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const s = io(), $ = id => document.getElementById(id), app = $('app');
+const COL = ['#e21b3c', '#1368ce', '#d89e00', '#26890c'], SYM = ['▲', '◆', '●', '■'];
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const h = html => app.innerHTML = html;
+let role = '', timer, cur = null, tok = '', pending = null, pendingName = '';
 
+function home() {
+  role = ''; gameActive = false; stopMusic(); setBg(''); if ($('snd')) $('snd').remove(); sessionStorage.removeItem('qbp'); sessionStorage.removeItem('qbh'); h(`<h1>QuizBlast</h1>
+  <div class="card"><input id="pin" placeholder="Mã PIN" inputmode="numeric"><input id="nm" placeholder="Tên của bạn" maxlength="20">
+  <button onclick="join()">Vào chơi</button><div id="err" class="er"></div></div>
+  <button class="ghost" onclick="hostLogin()">Tôi là host / giáo viên</button>`);
+}
+function join() { doJoin($('pin').value.trim(), $('nm').value, '', false); }
+function doJoin(pin, name, token, silent) {
+  s.emit('player:join', { pin, name, token }, r => {
+    if (r.err) {
+      if (silent) { sessionStorage.removeItem('qb'); role = ''; alert('Không vào lại được phòng: ' + r.err); home(); }
+      else $('err').textContent = r.err;
+      return;
+    }
+    role = 'player'; sessionStorage.qb = JSON.stringify({ pin, name: r.name, token: r.token });
+    if (r.state === 'lobby') h(`<h1>Đã vào phòng!</h1><div class="big">Chờ host bắt đầu…</div>`);
+  });
+}
+function hostLogin() {
+  h(`<h1>Đăng nhập host</h1><div class="card"><input id="pw" type="password" placeholder="Mật khẩu host">
+  <button onclick="doLogin()">Đăng nhập</button><div id="err" class="er"></div></div><button class="ghost" onclick="home()">← Quay lại</button>`);
+  $('pw').addEventListener('keydown', e => e.key === 'Enter' && doLogin());
+}
+async function doLogin() {
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pass: $('pw').value }) });
+  const d = await r.json(); if (!r.ok) return $('err').textContent = d.err;
+  tok = d.token; await hostMenu(true);
+}
+async function hostMenu(fromLogin) {
+  const r = await fetch('/api/quizzes', { headers: { 'x-token': tok } });
+  if (!r.ok) { sessionStorage.removeItem('qbp'); hostLogin(); return; }
+  sessionStorage.qbp = tok; sessionStorage.removeItem('qbh'); stopMusic(); setBg(''); if ($('snd')) $('snd').remove();
+  const qs = await r.json(); pending = null;
+  let rr = { enabled: false };
+  try { rr = await (await fetch('/api/results', { headers: { 'x-token': tok } })).json(); } catch {}
+  const items = rr.enabled ? (rr.items || []).map(x => ({ srv: 1, id: x.id, title: x.title, date: new Date(x.created_at).toLocaleString('vi-VN'), n: x.players }))
+    : getRes().map(x => ({ srv: 0, id: x.id, title: x.title, date: x.date, n: x.full.length }));
+  const resHtml = `<div class="card"><b>📁 Kết quả đã lưu ${rr.enabled ? '(trên Supabase, xem được từ mọi máy)' : '(trong trình duyệt này)'}</b>${items.length ? items.map(x => `<div class="row" style="margin:6px 0"><span>${esc(x.title)}<br><small>${esc(x.date)} · ${x.n} người</small></span><span><button class="sm" onclick="viewRes(${x.id},${x.srv})">Xem</button> <button class="sm" style="background:#e21b3c" onclick="delRes(${x.id},${x.srv})">Xoá</button></span></div>`).join('') : '<small>Chưa có kết quả nào.</small>'}</div>`;
+  h(`<h1>Bảng điều khiển host</h1>
+  <div class="card"><b>1. Chọn bộ câu hỏi</b><select id="qz">${qs.map(q => `<option value="${esc(q.id)}">${esc(q.title)}</option>`).join('')}</select>
+  <b>2. Cài đặt qua câu</b>
+  <label class="ck"><input type="checkbox" id="au" checked> Tự động qua câu khi hết thời gian chờ</label>
+  <label class="ck"><input type="checkbox" id="sq"> Xáo trộn thứ tự câu hỏi</label><label class="ck"><input type="checkbox" id="sa" checked> Xáo trộn vị trí đáp án (mỗi người chơi một kiểu khác nhau)</label>
+  <div class="two"><div>Thời gian chờ tự qua (giây)<input id="wt" type="number" value="10" min="0" max="120"></div>
+  <div>Tối thiểu trước khi bấm qua được (giây)<input id="mn" type="number" value="5" min="0" max="60"></div></div>
+  <small>Bỏ chọn tự động = chỉ qua câu khi host bấm nút (sau thời gian tối thiểu).</small>
+  <b>3. Nhạc nền &amp; hình nền</b>
+  <select id="mu"><option value="vui">🎉 Vui nhộn</option><option value="hoihop">⏱ Hồi hộp</option><option value="thugian">🌿 Thư giãn</option><option value="none">🔇 Không nhạc</option><option value="custom">📁 Tải file nhạc của bạn…</option></select>
+  <input type="file" id="muf" accept="audio/*" style="display:none">
+  <div class="two"><div>Âm lượng<input type="range" id="vol" min="0" max="100" value="50"></div><div><br><button class="sm" onclick="previewMusic()">▶ Nghe thử / dừng</button></div></div>
+  <div>Hình nền (hiện trên cả máy người chơi)<input type="file" id="bgf" accept="image/*" onchange="loadBg(this.files[0])"><small id="bgs"></small></div>
+  <small>Nhạc phát trên máy host (chiếu lên màn hình lớp). File nhạc tự tải lên chỉ dùng cho lần này.</small>
+  <button onclick="create()">Tạo phòng</button></div>
+  ${resHtml}
+  <div class="card"><b>Nạp câu hỏi mới</b><small>Cột A: câu hỏi · B,C,D,E: đáp án A,B,C,D · F: đáp án đúng (A/B/C/D) · G (tuỳ chọn): số giây</small>
+  <input type="file" id="fl" accept=".xlsx,.xls,.csv" onchange="loadFile(this.files[0])">
+  <input id="gs" placeholder="hoặc dán link Google Sheet (đã chia sẻ công khai)"><button class="sm" onclick="loadSheet()">Đọc Google Sheet</button>
+  <div id="pv"></div><div id="err" class="er"></div></div>
+  <button class="ghost" onclick="home()">Thoát</button>`);
+  const st = JSON.parse(localStorage.qb_set || '{}');
+  if (st.music && st.music !== 'custom') $('mu').value = st.music;
+  if (st.vol != null) $('vol').value = st.vol;
+  $('mu').onchange = () => { $('muf').style.display = $('mu').value === 'custom' ? 'block' : 'none'; };
+  $('muf').onchange = e => { if (e.target.files[0]) customUrl = URL.createObjectURL(e.target.files[0]); };
+  bgData = localStorage.qb_bg || ''; refreshBg();
+}
+function toQuestions(rows) {
+  const qs = [], bad = [];
+  rows.forEach((r, i) => {
+    r = r.map(x => String(x ?? '').trim()); if (!r[0]) return;
+    const o = r.slice(1, 5); while (o.length && !o[o.length - 1]) o.pop();
+    const raw = (r[5] || '').toLowerCase(); let c = -1;
+    if (/^[a-d]$/.test(raw)) c = 'abcd'.indexOf(raw); else if (/^[1-4]$/.test(raw)) c = +raw - 1; else c = o.findIndex(x => x.toLowerCase() === raw);
+    if (o.length < 2 || c < 0 || c >= o.length || !o[c]) { if (i > 0) bad.push(i + 1); return; }
+    const t = Number(r[6]); qs.push({ q: r[0], options: o, correct: c, time: t >= 5 && t <= 120 ? t : 20 });
+  });
+  return { qs, bad };
+}
+function showPending(rows, name) {
+  const { qs, bad } = toQuestions(rows);
+  if (!qs.length) { $('pv').innerHTML = ''; return $('err').textContent = 'Không đọc được câu hỏi nào. Kiểm tra lại định dạng cột.'; }
+  pending = qs; $('err').textContent = '';
+  $('pv').innerHTML = `<div class="big" style="font-size:1.1rem">Đọc được ${qs.length} câu${bad.length ? ` — bỏ qua ${bad.length} dòng lỗi (dòng ${bad.slice(0, 8).join(', ')}${bad.length > 8 ? '…' : ''}), hãy kiểm tra cột F` : ''}. Câu đầu: ${esc(qs[0].q)}</div>
+  <input id="tt" placeholder="Tên bộ câu hỏi" value="${esc(name)}"><button onclick="save()">Lưu bộ câu hỏi</button>`;
+}
+async function loadFile(f) {
+  if (!f) return;
+  try { const wb = XLSX.read(await f.arrayBuffer()); showPending(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }), f.name.replace(/\.\w+$/, '')); }
+  catch { $('err').textContent = 'Không đọc được file'; }
+}
+async function loadSheet() {
+  const r = await fetch('/api/sheet?url=' + encodeURIComponent($('gs').value), { headers: { 'x-token': tok } });
+  if (!r.ok) return $('err').textContent = (await r.json()).err;
+  const wb = XLSX.read(await r.text(), { type: 'string' });
+  showPending(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }), 'Google Sheet');
+}
+async function save() {
+  const r = await fetch('/api/quizzes', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-token': tok },
+    body: JSON.stringify({ title: $('tt').value.trim() || 'Quiz', questions: pending }) });
+  if (!r.ok) return $('err').textContent = (await r.json()).err; hostMenu();
+}
+function hostLobby(pin) {
+  h(`<h1>Vào bằng PIN</h1><div class="pin">${pin}</div><div id="pl" class="big">Chưa có ai</div><button onclick="startGame()">Bắt đầu</button>`);
+}
+function startGame() { s.emit('host:start', r => { if (r && r.err) alert(r.err); }); }
+function hostRejoin(v, silent) {
+  s.emit('host:rejoin', { pin: v.pin, htoken: v.htoken, token: tok }, r => {
+    if (r.err) { sessionStorage.removeItem('qbh'); role = ''; gameActive = false; if (!silent) return; alert('Không vào lại được phòng: ' + r.err); return hostMenu(); }
+    role = 'host'; gameActive = true; curTitle = v.title; soundBtn(); if (v.bg) setBg(localStorage.qb_bg || '');
+    if (r.state === 'lobby') hostLobby(v.pin);
+  });
+}
+function create() {
+  const music = $('mu').value, v = $('vol').value / 100, src = musicSrc();
+  try { localStorage.qb_set = JSON.stringify({ music, vol: $('vol').value }); } catch {}
+  curTitle = (($('qz').selectedOptions[0]) || {}).text || 'Quiz';
+  s.emit('host:create', { token: tok, id: $('qz').value, auto: $('au').checked, shuffleQ: $('sq').checked, shuffleA: $('sa').checked, wait: $('wt').value, min: $('mn').value, bg: bgData }, r => {
+    if (r.err) { alert(r.err); if (/phiên/.test(r.err)) hostLogin(); return; }
+    role = 'host'; gameActive = true; muted = false;
+    sessionStorage.qbh = JSON.stringify({ pin: r.pin, htoken: r.htoken, title: curTitle, bg: !!bgData });
+    setBg(bgData); stopMusic(); if (src) startMusic(src, v); soundBtn(); hostLobby(r.pin);
+  });
+}
+// ---- âm thanh / hình nền / hiệu ứng / hộp xác nhận / lưu kết quả ----
+const bgm = new Audio(); bgm.loop = true;
+let muted = false, vol = .5, customUrl = '', bgData = '', curTitle = '', gameActive = false;
+function startMusic(src, v) { vol = v; bgm.src = src; bgm.volume = v; bgm.muted = muted; bgm.play().catch(() => {}); }
+function stopMusic() { bgm.pause(); }
+function musicSrc() { const v = $('mu').value; return v === 'none' ? '' : v === 'custom' ? customUrl : `/sounds/${v}.wav`; }
+function previewMusic() { if (!bgm.paused) return stopMusic(); const src = musicSrc(); if (src) startMusic(src, $('vol').value / 100); }
+function applause() { const a = new Audio('/sounds/applause.wav'); a.volume = muted ? 0 : Math.min(1, vol + .4); a.play().catch(() => {}); }
+function soundBtn() {
+  if ($('snd')) return; const b = document.createElement('button'); b.id = 'snd'; b.className = 'sm';
+  b.style.cssText = 'position:fixed;top:8px;right:8px;width:auto;z-index:8;padding:6px 10px'; b.textContent = '🔊';
+  b.onclick = () => { muted = !muted; bgm.muted = muted; b.textContent = muted ? '🔇' : '🔊'; }; document.body.appendChild(b);
+}
+function setBg(u) {
+  const b = document.body.style;
+  b.backgroundImage = u ? `linear-gradient(rgba(0,0,0,.4),rgba(0,0,0,.4)),url("${u}")` : '';
+  b.backgroundSize = 'cover'; b.backgroundPosition = 'center'; b.backgroundAttachment = 'fixed';
+}
+function refreshBg() { $('bgs').innerHTML = bgData ? '✔ Đã chọn hình nền · <a href="#" style="color:#1368ce" onclick="clearBg();return false">xoá</a>' : 'Chưa chọn'; }
+function clearBg() { bgData = ''; localStorage.removeItem('qb_bg'); refreshBg(); }
+async function loadBg(f) {
+  if (!f) return;
+  try {
+    const img = new Image(); img.src = URL.createObjectURL(f); await img.decode();
+    const k = Math.min(1, 1024 / Math.max(img.width, img.height)), cv = document.createElement('canvas');
+    cv.width = img.width * k; cv.height = img.height * k; cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+    let q = .75, u = cv.toDataURL('image/jpeg', q); while (u.length > 260000 && q > .3) { q -= .1; u = cv.toDataURL('image/jpeg', q); }
+    bgData = u; try { localStorage.qb_bg = u; } catch {} refreshBg();
+  } catch { $('bgs').textContent = 'Không đọc được ảnh'; }
+}
+s.on('bg', u => setBg(u));
+function fireworks(ms = 7000) {
+  const cv = document.createElement('canvas'); cv.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9';
+  document.body.appendChild(cv); const x = cv.getContext('2d'); cv.width = innerWidth; cv.height = innerHeight;
+  let ps = [], end = Date.now() + ms, last = 0;
+  const burst = () => { const cx = Math.random() * cv.width, cy = Math.random() * cv.height * .5 + 40, col = `hsl(${Math.random() * 360},100%,60%)`;
+    for (let i = 0; i < 70; i++) { const a = Math.random() * 6.28, v = Math.random() * 5 + 1; ps.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, l: 1, c: col }); } };
+  (function f(t) {
+    x.clearRect(0, 0, cv.width, cv.height);
+    if (Date.now() < end && t - last > 400) { burst(); last = t; }
+    ps = ps.filter(p => p.l > 0);
+    ps.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += .06; p.vx *= .99; p.l -= .012; x.globalAlpha = Math.max(p.l, 0); x.fillStyle = p.c; x.fillRect(p.x, p.y, 3, 3); });
+    if (ps.length || Date.now() < end) requestAnimationFrame(f); else cv.remove();
+  })(0);
+}
+function ask(msg, yes = 'Có', no = 'Không') {
+  return new Promise(r => {
+    const d = document.createElement('div'); d.className = 'mod';
+    d.innerHTML = `<div class="box"><p>${msg}</p><button id="y">${yes}</button><button id="n" class="ghost">${no}</button></div>`;
+    document.body.appendChild(d); d.querySelector('#y').onclick = () => { d.remove(); r(true); }; d.querySelector('#n').onclick = () => { d.remove(); r(false); };
+  });
+}
+const RK = 'qb_results';
+const getRes = () => { try { return JSON.parse(localStorage[RK] || '[]'); } catch { return []; } };
+const putRes = a => { try { localStorage[RK] = JSON.stringify(a); } catch {} };
+function saveRes(d) { if (getRes().some(x => x.rid === d.rid)) return; putRes([{ id: Date.now(), rid: d.rid, title: curTitle, date: new Date().toLocaleString('vi-VN'), top: d.top, full: d.full, qs: d.qs }, ...getRes()].slice(0, 15)); }
+async function viewRes(id, srv) {
+  let r;
+  if (srv) { const x = await fetch('/api/results/' + id, { headers: { 'x-token': tok } }); if (!x.ok) return alert('Không tải được kết quả'); r = await x.json(); r.date = new Date(r.created_at).toLocaleString('vi-VN'); }
+  else r = getRes().find(x => x.id === id);
+  if (r) { lastEnd = r; showEnd(r, true, r); }
+}
+async function delRes(id, srv) {
+  if (!await ask('Xoá kết quả này? Không thể khôi phục.', 'Xoá', 'Giữ lại')) return;
+  if (srv) await fetch('/api/results/' + id, { method: 'DELETE', headers: { 'x-token': tok } }); else putRes(getRes().filter(x => x.id !== id));
+  hostMenu();
+}
+window.addEventListener('beforeunload', e => { if (role === 'host' && gameActive) { e.preventDefault(); e.returnValue = ''; } });
+let lobbyList = [];
+s.on('lobby', n => {
+  lobbyList = n; if (!$('pl')) return;
+  $('pl').innerHTML = n.length ? `<div>${n.length} người chơi</div>` + n.map((x, i) => `<span class="chip ${x.online ? '' : 'dim'}">${esc(x.name)} <a href="#" style="color:#fff" onclick="kick(${i});return false">✕</a></span>`).join('') : 'Chưa có ai';
+});
+async function kick(i) { if (lobbyList[i] && await ask('Đuổi ' + esc(lobbyList[i].name) + ' khỏi phòng?')) s.emit('host:kick', lobbyList[i].key); }
+s.on('kicked', () => { sessionStorage.removeItem('qb'); role = ''; alert('Bạn đã bị host mời ra khỏi phòng'); home(); });
+s.on('sent', showSent);
+s.on('connect', () => {
+  $('net').style.display = 'none'; $('net').textContent = 'Mất kết nối, đang kết nối lại…';
+  const v = JSON.parse(sessionStorage.qb || 'null'), hv = JSON.parse(sessionStorage.qbh || 'null');
+  if (role === 'player' && v) doJoin(v.pin, v.name, v.token, true);
+  else if (role === 'host' && hv) hostRejoin(hv, true);
+});
+s.on('hostoff', () => { if (role === 'player') { $('net').textContent = 'Host đang mất kết nối, vui lòng chờ…'; $('net').style.display = 'block'; } });
+s.on('hoston', () => { if (role === 'player') $('net').style.display = 'none'; });
+s.on('disconnect', () => { if (role) $('net').style.display = 'block'; });
+let qEnd = 0;
+function drawQ(note) {
+  clearInterval(timer); const q = cur;
+  const head = `<div>Câu ${q.i}/${q.total} · <b id="tm">${Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0)}</b>s</div><div class="big">${esc(q.q)}</div>`;
+  if (role === 'host') h(head + `<div class="grid">${q.options.map((o, i) => `<div class="panel" style="margin:0;background:${COL[i]}">${SYM[i]} ${esc(o)}</div>`).join('')}</div><div id="an" class="big">0 đã trả lời</div>`);
+  else if (role === 'player') h(head + (note ? `<div class="er" style="color:#ffd602">${esc(note)}</div>` : '') + `<div class="grid">${q.options.map((o, i) => `<button style="background:${COL[i]}" onclick="ans(${i})">${SYM[i]} ${esc(o)}</button>`).join('')}</div>`);
+  timer = setInterval(() => { const t = Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0); if ($('tm')) $('tm').textContent = t; if (t <= 0) clearInterval(timer); }, 500);
+}
+s.on('question', q => { cur = q; qEnd = Date.now() + q.time * 1000; drawQ(); });
+const showSent = () => h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`);
+function ans(i) {
+  document.querySelectorAll('.grid button').forEach(b => b.disabled = true);
+  let done = false;
+  const to = setTimeout(() => { if (!done) { done = true; drawQ('Chưa gửi được, hãy chọn lại'); } }, 5000);
+  s.emit('player:answer', i, r => { if (done) return; done = true; clearTimeout(to); if (r && r.ok) showSent(); else drawQ((r && r.err) || 'Chưa gửi được, hãy chọn lại'); });
+}
+s.on('answered', d => { if ($('an')) $('an').textContent = `${d.done}/${d.total} đã trả lời`; });
+const board = (t, me) => t.map((p, i) => `<div class="row ${p.name === me ? 'me' : ''}"><span>${i + 1}. ${esc(p.name)}</span><b>${p.score}</b></div>`).join('');
+s.on('reveal', d => {
+  clearInterval(timer); const mx = Math.max(...d.counts, 1), t0 = Date.now();
+  h(`<div class="big">Đáp án đúng: ${SYM[d.correct]} ${esc(d.options[d.correct])}</div>
+  ${d.options.map((o, i) => `<div class="${i === d.correct ? '' : 'dim'}" style="text-align:left;margin:8px 0">${SYM[i]} ${esc(o)} <span class="bar" style="width:${d.counts[i] / mx * 60}%;background:${COL[i]}"></span> ${d.counts[i]}</div>`).join('')}
+  <h2>Bảng xếp hạng</h2>${board(d.top)}<button id="nx" disabled></button><div id="au2"></div>`);
+  const label = d.last ? 'Kết thúc' : 'Câu tiếp theo';
+  const tick = () => {
+    const e = (Date.now() - t0) / 1000, m = Math.ceil(d.min - e);
+    if (!$('nx')) return clearInterval(timer);
+    $('nx').disabled = m > 0; $('nx').textContent = m > 0 ? `${label} (chờ ${m}s)` : label; $('nx').onclick = () => s.emit('host:next');
+    if (d.auto) $('au2').textContent = `Tự động qua sau ${Math.max(Math.ceil(d.wait - e), 0)}s`;
+  };
+  tick(); timer = setInterval(tick, 500);
+});
+s.on('result', r => {
+  clearInterval(timer);
+  h(`<div class="panel ${r.correct ? 'ok' : 'bad'}"><h1>${r.answered ? (r.correct ? 'ĐÚNG! 🎉' : 'SAI 😅') : 'Hết giờ ⏰'}</h1>
+  <div class="big">+${r.gained} điểm</div>${r.correct ? '' : `<div>Đáp án đúng: <b>${esc(r.correctText)}</b></div>`}</div>
+  <div class="big">Tổng ${r.score} điểm · Hạng ${r.rank}/${r.total}</div>
+  <h2>Bảng xếp hạng</h2>${board(r.top, r.name)}`);
+});
+let lastEnd = null;
+function showEnd(d, saved, meta) {
+  h(`<h1>🏆 Kết quả</h1>${meta ? `<div>${esc(meta.title)} · ${esc(meta.date)}</div>` : ''}${board(d.full || d.top)}` +
+    (d.full ? `<button onclick="csv()">⬇ Tải bảng điểm (CSV)</button><button class="ghost" onclick="leaveEnd(${saved})">Về trang host</button>` : `<button onclick="location.reload()">Chơi lại</button>`));
+}
+async function leaveEnd(saved) {
+  if (saved || await ask('Rời khỏi trang kết quả?<br><small>Kết quả đã được lưu trong trình duyệt. Xem lại ở mục "Kết quả đã lưu" trên trang host.</small>', 'Có, rời đi', 'Không, ở lại')) hostMenu();
+}
+s.on('end', d => {
+  clearInterval(timer); lastEnd = d; sessionStorage.removeItem('qb'); gameActive = false; stopMusic();
+  if (d.full) saveRes(d);
+  showEnd(d, false); fireworks(); applause();
+});
+function csv() {
+  const d = lastEnd, e = v => { v = String(v); if (/^[=+\-@]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const rows = [['Hạng', 'Tên', 'Tổng điểm', 'Số câu đúng', ...d.qs.map((q, i) => `Câu ${i + 1}: ${q.slice(0, 40)}`)],
+    ...d.full.map((p, i) => [i + 1, p.name, p.score, p.correct, ...p.log])];
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.map(r => r.map(e).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'ket-qua.csv'; a.click();
+}
+s.on('closed', () => { sessionStorage.removeItem('qb'); role = ''; alert('Host đã thoát phòng'); home(); });
+const saved = JSON.parse(sessionStorage.qb || 'null');
+const savedH = JSON.parse(sessionStorage.qbh || 'null');
+if (saved) doJoin(saved.pin, saved.name, saved.token, true);
+else if (sessionStorage.qbp && savedH) { tok = sessionStorage.qbp; hostRejoin(savedH, true); }
+else if (sessionStorage.qbp) { tok = sessionStorage.qbp; hostMenu(true); }
+else home();
+</script></body></html>
