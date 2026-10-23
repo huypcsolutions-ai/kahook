@@ -34,11 +34,11 @@ function join() { doJoin($('pin').value.trim(), $('nm').value, '', false); }
 function doJoin(pin, name, token, silent) {
   s.emit('player:join', { pin, name, token }, r => {
     if (r.err) {
-      if (silent) { sessionStorage.removeItem('qb'); role = ''; alert('Không vào lại được phòng: ' + r.err); home(); }
+      if (silent) { localStorage.removeItem('qb'); role = ''; if (r.err !== 'PIN không đúng') alert('Không vào lại được phòng: ' + r.err); home(); }
       else $('err').textContent = r.err;
       return;
     }
-    role = 'player'; sessionStorage.qb = JSON.stringify({ pin, name: r.name, token: r.token });
+    role = 'player'; localStorage.qb = JSON.stringify({ pin, name: r.name, token: r.token, t: Date.now() });
     if (r.state === 'lobby') h(`<h1>Đã vào phòng!</h1><div class="big">Chờ host bắt đầu…</div>`);
   });
 }
@@ -98,7 +98,7 @@ function toQuestions(rows) {
     const raw = (r[5] || '').toLowerCase(); let c = -1;
     if (/^[a-d]$/.test(raw)) c = 'abcd'.indexOf(raw); else if (/^[1-4]$/.test(raw)) c = +raw - 1; else c = o.findIndex(x => x.toLowerCase() === raw);
     if (o.length < 2 || c < 0 || c >= o.length || !o[c]) { if (i > 0) bad.push(i + 1); return; }
-    const t = Number(r[6]); qs.push({ q: r[0], options: o, correct: c, time: t >= 5 && t <= 120 ? t : 20 });
+    const t = Number(r[6]); qs.push({ q: r[0], options: o, correct: c, time: t >= 5 && t <= 120 ? Math.round(t) : 20 });
   });
   return { qs, bad };
 }
@@ -179,11 +179,12 @@ async function loadBg(f) {
 }
 s.on('bg', u => setBg(u));
 function fireworks(ms = 7000) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const cv = document.createElement('canvas'); cv.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9';
   document.body.appendChild(cv); const x = cv.getContext('2d'); cv.width = innerWidth; cv.height = innerHeight;
   let ps = [], end = Date.now() + ms, last = 0;
   const burst = () => { const cx = Math.random() * cv.width, cy = Math.random() * cv.height * .5 + 40, col = `hsl(${Math.random() * 360},100%,60%)`;
-    for (let i = 0; i < 70; i++) { const a = Math.random() * 6.28, v = Math.random() * 5 + 1; ps.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, l: 1, c: col }); } };
+    for (let i = 0; i < (navigator.hardwareConcurrency <= 4 ? 30 : 70); i++) { const a = Math.random() * 6.28, v = Math.random() * 5 + 1; ps.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, l: 1, c: col }); } };
   (function f(t) {
     x.clearRect(0, 0, cv.width, cv.height);
     if (Date.now() < end && t - last > 400) { burst(); last = t; }
@@ -201,8 +202,8 @@ function ask(msg, yes = 'Có', no = 'Không') {
 }
 const RK = 'qb_results';
 const getRes = () => { try { return JSON.parse(localStorage[RK] || '[]'); } catch { return []; } };
-const putRes = a => { try { localStorage[RK] = JSON.stringify(a); } catch {} };
-function saveRes(d) { if (getRes().some(x => x.rid === d.rid)) return; putRes([{ id: Date.now(), rid: d.rid, title: curTitle, date: new Date().toLocaleString('vi-VN'), top: d.top, full: d.full, qs: d.qs }, ...getRes()].slice(0, 15)); }
+const putRes = a => { try { localStorage[RK] = JSON.stringify(a); return true; } catch { return false; } };
+function saveRes(d) { if (getRes().some(x => x.rid === d.rid)) return true; return putRes([{ id: Date.now(), rid: d.rid, title: curTitle, date: new Date().toLocaleString('vi-VN'), top: d.top, full: d.full, qs: d.qs }, ...getRes()].slice(0, 15)); }
 async function viewRes(id, srv) {
   let r;
   if (srv) { const x = await fetch('/api/results/' + id, { headers: { 'x-token': tok } }); if (!x.ok) return alert('Không tải được kết quả'); r = await x.json(); r.date = new Date(r.created_at).toLocaleString('vi-VN'); }
@@ -221,11 +222,11 @@ s.on('lobby', n => {
   $('pl').innerHTML = n.length ? `<div>${n.length} người chơi</div>` + n.map((x, i) => `<span class="chip ${x.online ? '' : 'dim'}">${esc(x.name)} <a href="#" style="color:#fff" onclick="kick(${i});return false">✕</a></span>`).join('') : 'Chưa có ai';
 });
 async function kick(i) { if (lobbyList[i] && await ask('Đuổi ' + esc(lobbyList[i].name) + ' khỏi phòng?')) s.emit('host:kick', lobbyList[i].key); }
-s.on('kicked', () => { sessionStorage.removeItem('qb'); role = ''; alert('Bạn đã bị host mời ra khỏi phòng'); home(); });
+s.on('kicked', () => { localStorage.removeItem('qb'); role = ''; alert('Bạn đã bị host mời ra khỏi phòng'); home(); });
 s.on('sent', showSent);
 s.on('connect', () => {
   $('net').style.display = 'none'; $('net').textContent = 'Mất kết nối, đang kết nối lại…';
-  const v = JSON.parse(sessionStorage.qb || 'null'), hv = JSON.parse(sessionStorage.qbh || 'null');
+  const v = JSON.parse(localStorage.qb || 'null'), hv = JSON.parse(sessionStorage.qbh || 'null');
   if (role === 'player' && v) doJoin(v.pin, v.name, v.token, true);
   else if (role === 'host' && hv) hostRejoin(hv, true);
 });
@@ -271,18 +272,20 @@ s.on('result', r => {
   <div class="big">Tổng ${r.score} điểm · Hạng ${r.rank}/${r.total}</div>
   <h2>Bảng xếp hạng</h2>${board(r.top, r.name)}`);
 });
+s.on('saveStatus', d => { const e = $('sv'); if (e) { e.style.color = d.ok ? '#9f9' : '#ffd602'; e.textContent = d.ok ? '✔ Đã lưu lên Supabase' : `⚠ Chưa lưu được lên Supabase (${d.msg}). Hệ thống đang thử lại; kết quả vẫn có trong trình duyệt.`; } });
 let lastEnd = null;
 function showEnd(d, saved, meta) {
-  h(`<h1>🏆 Kết quả</h1>${meta ? `<div>${esc(meta.title)} · ${esc(meta.date)}</div>` : ''}${board(d.full || d.top)}` +
+  h(`<h1>🏆 Kết quả</h1>${meta ? `<div>${esc(meta.title)} · ${esc(meta.date)}</div>` : ''}${board(d.full || d.top)}${d.full && !saved ? '<div id="sl" class="er"></div><div id="sv" class="er"></div>' : ''}` +
     (d.full ? `<button onclick="csv()">⬇ Tải bảng điểm (CSV)</button><button class="ghost" onclick="leaveEnd(${saved})">Về trang host</button>` : `<button onclick="location.reload()">Chơi lại</button>`));
 }
 async function leaveEnd(saved) {
   if (saved || await ask('Rời khỏi trang kết quả?<br><small>Kết quả đã được lưu trong trình duyệt. Xem lại ở mục "Kết quả đã lưu" trên trang host.</small>', 'Có, rời đi', 'Không, ở lại')) hostMenu();
 }
 s.on('end', d => {
-  clearInterval(timer); lastEnd = d; sessionStorage.removeItem('qb'); gameActive = false; stopMusic();
-  if (d.full) saveRes(d);
+  clearInterval(timer); lastEnd = d; localStorage.removeItem('qb'); gameActive = false; stopMusic();
+  const okLocal = d.full ? saveRes(d) : true;
   showEnd(d, false); fireworks(); applause();
+  if (!okLocal && $('sl')) $('sl').textContent = '⚠ Không lưu được vào trình duyệt (bộ nhớ đầy?). Hãy tải CSV ngay!';
 });
 function csv() {
   const d = lastEnd, e = v => { v = String(v); if (/^[=+\-@]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
@@ -292,8 +295,9 @@ function csv() {
   a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.map(r => r.map(e).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
   a.download = 'ket-qua.csv'; a.click();
 }
-s.on('closed', () => { sessionStorage.removeItem('qb'); role = ''; alert('Host đã thoát phòng'); home(); });
-const saved = JSON.parse(sessionStorage.qb || 'null');
+s.on('closed', () => { localStorage.removeItem('qb'); role = ''; alert('Host đã thoát phòng'); home(); });
+let saved = JSON.parse(localStorage.qb || 'null');
+if (saved && Date.now() - (saved.t || 0) > 6 * 3600e3) { localStorage.removeItem('qb'); saved = null; }
 const savedH = JSON.parse(sessionStorage.qbh || 'null');
 if (saved) doJoin(saved.pin, saved.name, saved.token, true);
 else if (sessionStorage.qbp && savedH) { tok = sessionStorage.qbp; hostRejoin(savedH, true); }
