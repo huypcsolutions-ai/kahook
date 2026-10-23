@@ -52,38 +52,62 @@ async function getQuiz(id) {
 
 const games = {};
 const clamp = (v, a, b, d) => { v = Number(v); return Number.isFinite(v) ? Math.min(Math.max(v, a), b) : d; };
-const top = (g, n) => Object.values(g.players).sort((a, b) => b.score - a.score).slice(0, n).map(p => ({ name: p.name, score: p.score }));
-const names = g => Object.values(g.players).map(p => p.name);
+const shuf = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const plist = g => Object.values(g.players);
+const top = (g, n) => plist(g).sort((a, b) => b.score - a.score).slice(0, n).map(p => ({ name: p.name, score: p.score }));
+const lobby = g => plist(g).map(p => ({ key: p.key, name: p.name, online: p.online }));
+const qFor = (g, p, time) => {
+  const q = g.questions[g.qi], perm = p ? p.perm : q.options.map((_, i) => i);
+  return { i: g.qi + 1, total: g.questions.length, q: q.q, options: perm.map(i => q.options[i]), time };
+};
+const progress = g => { const on = plist(g).filter(p => p.online); io.to(g.host).emit('answered', { done: on.filter(p => p.ans).length, total: on.length }); };
+const checkDone = pin => { const g = games[pin]; if (!g || g.state !== 'question') return; progress(g);
+  const on = plist(g).filter(p => p.online); if (on.length && on.every(p => p.ans)) reveal(pin); };
 
 function advance(pin) {
   const g = games[pin]; if (!g || g.state === 'question' || g.state === 'end') return;
   clearTimeout(g.autoTimer); g.qi++;
-  if (g.qi >= g.quiz.questions.length) { g.state = 'end'; return io.to(pin).emit('end', top(g, 10)); }
-  const q = g.quiz.questions[g.qi];
+  if (g.qi >= g.questions.length) {
+    g.state = 'end'; g.finalTop = top(g, 10);
+    plist(g).forEach(p => io.to(p.sid).emit('end', { top: g.finalTop }));
+    const full = plist(g).sort((a, b) => b.score - a.score).map(p => ({ name: p.name, score: p.score, correct: p.correct, log: p.log }));
+    return io.to(g.host).emit('end', { top: g.finalTop, full, qs: g.questions.map(q => q.q) });
+  }
+  const q = g.questions[g.qi], n = q.options.length, t = q.time || 20;
   g.state = 'question'; g.t0 = Date.now();
-  Object.values(g.players).forEach(p => p.ans = null);
-  io.to(pin).emit('question', { i: g.qi + 1, total: g.quiz.questions.length, q: q.q, options: q.options, time: q.time || 20 });
-  g.timer = setTimeout(() => reveal(pin), (q.time || 20) * 1000);
+  plist(g).forEach(p => { p.ans = null; const idx = [...Array(n).keys()]; p.perm = g.shuffleA ? shuf(idx) : idx; });
+  io.to(g.host).emit('question', qFor(g, null, t));
+  plist(g).forEach(p => io.to(p.sid).emit('question', qFor(g, p, t)));
+  g.timer = setTimeout(() => reveal(pin), t * 1000);
 }
 function reveal(pin) {
   const g = games[pin]; if (!g || g.state !== 'question') return;
   clearTimeout(g.timer); g.state = 'reveal'; g.revealAt = Date.now();
-  const q = g.quiz.questions[g.qi], limit = (q.time || 20) * 1000, counts = q.options.map(() => 0);
-  const list = Object.entries(g.players);
-  list.forEach(([, p]) => {
+  const q = g.questions[g.qi], limit = (q.time || 20) * 1000, counts = q.options.map(() => 0), list = plist(g);
+  list.forEach(p => {
     p.gained = 0;
     if (p.ans) {
       counts[p.ans.idx]++;
-      if (p.ans.idx === q.correct) { p.gained = Math.round(1000 * (1 - Math.min(p.ans.ms / limit, 1) / 2)); p.score += p.gained; }
+      if (p.ans.idx === q.correct) { p.gained = Math.round(1000 * (1 - Math.min(p.ans.ms / limit, 1) / 2)); p.score += p.gained; p.correct++; }
     }
+    p.log.push(p.gained);
   });
   const t5 = top(g, 5);
-  list.sort((a, b) => b[1].score - a[1].score).forEach(([id, p], i) =>
-    io.to(id).emit('result', { name: p.name, answered: !!p.ans, correct: !!p.ans && p.ans.idx === q.correct,
-      correctText: q.options[q.correct], gained: p.gained, score: p.score, rank: i + 1, total: list.length, top: t5 }));
-  const last = g.qi === g.quiz.questions.length - 1;
-  io.to(g.host).emit('reveal', { correct: q.correct, counts, top: t5, last, auto: g.auto, min: g.min, wait: g.wait });
+  list.sort((a, b) => b.score - a.score).forEach((p, i) => {
+    p.lastResult = { name: p.name, answered: !!p.ans, correct: !!p.ans && p.ans.idx === q.correct, correctText: q.options[q.correct],
+      gained: p.gained, score: p.score, rank: i + 1, total: list.length, top: t5 };
+    io.to(p.sid).emit('result', p.lastResult);
+  });
+  io.to(g.host).emit('reveal', { correct: q.correct, counts, top: t5, last: g.qi === g.questions.length - 1, auto: g.auto, min: g.min, wait: g.wait });
   if (g.auto) g.autoTimer = setTimeout(() => advance(pin), g.wait * 1000);
+}
+// Gửi lại trạng thái hiện tại cho người chơi vừa vào lại
+function sync(g, p, s) {
+  if (g.state === 'question') {
+    const q = g.questions[g.qi], rem = Math.max(1, Math.ceil(((q.time || 20) * 1000 - (Date.now() - g.t0)) / 1000));
+    s.emit('question', qFor(g, p, rem)); if (p.ans) s.emit('sent');
+  } else if (g.state === 'reveal' && p.lastResult) s.emit('result', p.lastResult);
+  else if (g.state === 'end') s.emit('end', { top: g.finalTop });
 }
 
 io.on('connection', s => {
@@ -92,35 +116,56 @@ io.on('connection', s => {
     const quiz = await getQuiz(o.id); if (!quiz) return cb({ err: 'Không tìm thấy quiz' });
     let pin; do pin = String(Math.floor(100000 + Math.random() * 900000)); while (games[pin]);
     const min = clamp(o.min, 0, 60, 5), wait = Math.max(min, clamp(o.wait, 0, 120, 10));
-    games[pin] = { host: s.id, quiz, players: {}, state: 'lobby', qi: -1, auto: !!o.auto, min, wait };
+    const questions = o.shuffleQ ? shuf([...quiz.questions]) : quiz.questions;
+    games[pin] = { host: s.id, quiz, questions, players: {}, state: 'lobby', qi: -1, auto: !!o.auto, min, wait, shuffleA: !!o.shuffleA };
     s.join(pin); s.data.pin = pin; cb({ pin });
   });
-  s.on('player:join', ({ pin, name } = {}, cb) => {
+  // Vào mới hoặc vào lại (cùng tên: giữ nguyên điểm)
+  s.on('player:join', ({ pin, name, token } = {}, cb) => {
     const g = games[pin]; name = String(name || '').trim().slice(0, 20);
     if (!g) return cb({ err: 'PIN không đúng' });
-    if (g.state !== 'lobby') return cb({ err: 'Game đã bắt đầu' });
     if (!name) return cb({ err: 'Hãy nhập tên' });
-    if (names(g).some(n => n.toLowerCase() === name.toLowerCase())) return cb({ err: 'Tên đã được dùng' });
-    g.players[s.id] = { name, score: 0 }; s.join(pin); s.data.pin = pin;
-    io.to(g.host).emit('lobby', names(g)); cb({ ok: 1 });
+    const key = name.toLowerCase(); let p = g.players[key];
+    if (p) {
+      if (p.online && p.sid !== s.id && p.token !== token) return cb({ err: 'Tên đã được dùng' });
+      p.sid = s.id; p.online = true;
+    } else {
+      if (g.state !== 'lobby') return cb({ err: 'Game đã bắt đầu' });
+      p = g.players[key] = { key, name, score: 0, correct: 0, log: [], token: Math.random().toString(36).slice(2), sid: s.id, online: true };
+    }
+    s.join(pin); s.data.pin = pin; s.data.key = key;
+    io.to(g.host).emit('lobby', lobby(g));
+    cb({ ok: 1, token: p.token, name: p.name, state: g.state });
+    if (g.state !== 'lobby') { sync(g, p, s); progress(g); }
+  });
+  s.on('host:kick', key => {
+    const g = games[s.data.pin]; if (!g || g.host !== s.id || g.state !== 'lobby') return;
+    const p = g.players[key]; if (!p) return;
+    delete g.players[key];
+    const sock = io.sockets.sockets.get(p.sid);
+    if (sock) { sock.emit('kicked'); sock.leave(s.data.pin); sock.data.pin = null; }
+    io.to(g.host).emit('lobby', lobby(g));
   });
   s.on('host:next', () => {
     const g = games[s.data.pin]; if (!g || g.host !== s.id) return;
-    if (g.state === 'reveal' && Date.now() - g.revealAt < g.min * 1000) return; // chưa đủ thời gian tối thiểu
+    if (g.state === 'reveal' && Date.now() - g.revealAt < g.min * 1000) return;
     advance(s.data.pin);
   });
   s.on('player:answer', idx => {
-    const g = games[s.data.pin], p = g && g.players[s.id];
-    if (!p || g.state !== 'question' || p.ans || !Number.isInteger(idx)) return;
-    p.ans = { idx, ms: Date.now() - g.t0 };
-    const all = Object.values(g.players), done = all.filter(x => x.ans).length;
-    io.to(g.host).emit('answered', { done, total: all.length });
-    if (done === all.length) reveal(s.data.pin);
+    const g = games[s.data.pin], p = g && g.players[s.data.key];
+    if (!p || p.sid !== s.id || g.state !== 'question' || p.ans || !Number.isInteger(idx)) return;
+    const orig = p.perm && p.perm[idx]; if (orig === undefined) return;
+    p.ans = { idx: orig, ms: Date.now() - g.t0 };
+    checkDone(s.data.pin);
   });
   s.on('disconnect', () => {
     const pin = s.data.pin, g = games[pin]; if (!g) return;
-    if (g.host === s.id) { clearTimeout(g.timer); clearTimeout(g.autoTimer); io.to(pin).emit('closed'); delete games[pin]; }
-    else if (g.state === 'lobby') { delete g.players[s.id]; io.to(g.host).emit('lobby', names(g)); }
+    if (g.host === s.id) { clearTimeout(g.timer); clearTimeout(g.autoTimer); io.to(pin).emit('closed'); delete games[pin]; return; }
+    const p = g.players[s.data.key];
+    if (p && p.sid === s.id) {
+      p.online = false;
+      if (g.state === 'lobby') io.to(g.host).emit('lobby', lobby(g)); else checkDone(pin);
+    }
   });
 });
 server.listen(process.env.PORT || 3000, () => console.log('Running'));
