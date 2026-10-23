@@ -22,10 +22,10 @@ const s = io(), $ = id => document.getElementById(id), app = $('app');
 const COL = ['#e21b3c', '#1368ce', '#d89e00', '#26890c'], SYM = ['▲', '◆', '●', '■'];
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const h = html => app.innerHTML = html;
-let role = '', timer, cur = null, pass = '', pending = null, pendingName = '';
+let role = '', timer, cur = null, tok = '', pending = null, pendingName = '';
 
 function home() {
-  role = ''; gameActive = false; stopMusic(); setBg(''); if ($('snd')) $('snd').remove(); sessionStorage.removeItem('qbp'); h(`<h1>QuizBlast</h1>
+  role = ''; gameActive = false; stopMusic(); setBg(''); if ($('snd')) $('snd').remove(); sessionStorage.removeItem('qbp'); sessionStorage.removeItem('qbh'); h(`<h1>QuizBlast</h1>
   <div class="card"><input id="pin" placeholder="Mã PIN" inputmode="numeric"><input id="nm" placeholder="Tên của bạn" maxlength="20">
   <button onclick="join()">Vào chơi</button><div id="err" class="er"></div></div>
   <button class="ghost" onclick="hostLogin()">Tôi là host / giáo viên</button>`);
@@ -47,13 +47,21 @@ function hostLogin() {
   <button onclick="doLogin()">Đăng nhập</button><div id="err" class="er"></div></div><button class="ghost" onclick="home()">← Quay lại</button>`);
   $('pw').addEventListener('keydown', e => e.key === 'Enter' && doLogin());
 }
-async function doLogin() { pass = $('pw').value; await hostMenu(true); }
+async function doLogin() {
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pass: $('pw').value }) });
+  const d = await r.json(); if (!r.ok) return $('err').textContent = d.err;
+  tok = d.token; await hostMenu(true);
+}
 async function hostMenu(fromLogin) {
-  const r = await fetch('/api/quizzes', { headers: { 'x-pass': pass } });
-  if (!r.ok) { sessionStorage.removeItem('qbp'); if (fromLogin && $('pw')) $('err').textContent = 'Sai mật khẩu'; else hostLogin(); return; }
-  sessionStorage.qbp = pass; stopMusic(); setBg(''); if ($('snd')) $('snd').remove();
+  const r = await fetch('/api/quizzes', { headers: { 'x-token': tok } });
+  if (!r.ok) { sessionStorage.removeItem('qbp'); hostLogin(); return; }
+  sessionStorage.qbp = tok; sessionStorage.removeItem('qbh'); stopMusic(); setBg(''); if ($('snd')) $('snd').remove();
   const qs = await r.json(); pending = null;
-  const rs = getRes(), resHtml = `<div class="card"><b>📁 Kết quả đã lưu (trong trình duyệt này)</b>${rs.length ? rs.map(x => `<div class="row" style="margin:6px 0"><span>${esc(x.title)}<br><small>${esc(x.date)} · ${x.full.length} người</small></span><span><button class="sm" onclick="viewRes(${x.id})">Xem</button> <button class="sm" style="background:#e21b3c" onclick="delRes(${x.id})">Xoá</button></span></div>`).join('') : '<small>Chưa có kết quả nào.</small>'}</div>`;
+  let rr = { enabled: false };
+  try { rr = await (await fetch('/api/results', { headers: { 'x-token': tok } })).json(); } catch {}
+  const items = rr.enabled ? (rr.items || []).map(x => ({ srv: 1, id: x.id, title: x.title, date: new Date(x.created_at).toLocaleString('vi-VN'), n: x.players }))
+    : getRes().map(x => ({ srv: 0, id: x.id, title: x.title, date: x.date, n: x.full.length }));
+  const resHtml = `<div class="card"><b>📁 Kết quả đã lưu ${rr.enabled ? '(trên Supabase, xem được từ mọi máy)' : '(trong trình duyệt này)'}</b>${items.length ? items.map(x => `<div class="row" style="margin:6px 0"><span>${esc(x.title)}<br><small>${esc(x.date)} · ${x.n} người</small></span><span><button class="sm" onclick="viewRes(${x.id},${x.srv})">Xem</button> <button class="sm" style="background:#e21b3c" onclick="delRes(${x.id},${x.srv})">Xoá</button></span></div>`).join('') : '<small>Chưa có kết quả nào.</small>'}</div>`;
   h(`<h1>Bảng điều khiển host</h1>
   <div class="card"><b>1. Chọn bộ câu hỏi</b><select id="qz">${qs.map(q => `<option value="${esc(q.id)}">${esc(q.title)}</option>`).join('')}</select>
   <b>2. Cài đặt qua câu</b>
@@ -83,22 +91,22 @@ async function hostMenu(fromLogin) {
   bgData = localStorage.qb_bg || ''; refreshBg();
 }
 function toQuestions(rows) {
-  const qs = []; let skipped = 0;
+  const qs = [], bad = [];
   rows.forEach((r, i) => {
     r = r.map(x => String(x ?? '').trim()); if (!r[0]) return;
     const o = r.slice(1, 5); while (o.length && !o[o.length - 1]) o.pop();
     const raw = (r[5] || '').toLowerCase(); let c = -1;
     if (/^[a-d]$/.test(raw)) c = 'abcd'.indexOf(raw); else if (/^[1-4]$/.test(raw)) c = +raw - 1; else c = o.findIndex(x => x.toLowerCase() === raw);
-    if (o.length < 2 || c < 0 || c >= o.length || !o[c]) { if (i > 0) skipped++; return; }
+    if (o.length < 2 || c < 0 || c >= o.length || !o[c]) { if (i > 0) bad.push(i + 1); return; }
     const t = Number(r[6]); qs.push({ q: r[0], options: o, correct: c, time: t >= 5 && t <= 120 ? t : 20 });
   });
-  return { qs, skipped };
+  return { qs, bad };
 }
 function showPending(rows, name) {
-  const { qs, skipped } = toQuestions(rows);
+  const { qs, bad } = toQuestions(rows);
   if (!qs.length) { $('pv').innerHTML = ''; return $('err').textContent = 'Không đọc được câu hỏi nào. Kiểm tra lại định dạng cột.'; }
   pending = qs; $('err').textContent = '';
-  $('pv').innerHTML = `<div class="big" style="font-size:1.1rem">Đọc được ${qs.length} câu${skipped ? ` (bỏ qua ${skipped} dòng lỗi)` : ''}. Câu đầu: ${esc(qs[0].q)}</div>
+  $('pv').innerHTML = `<div class="big" style="font-size:1.1rem">Đọc được ${qs.length} câu${bad.length ? ` — bỏ qua ${bad.length} dòng lỗi (dòng ${bad.slice(0, 8).join(', ')}${bad.length > 8 ? '…' : ''}), hãy kiểm tra cột F` : ''}. Câu đầu: ${esc(qs[0].q)}</div>
   <input id="tt" placeholder="Tên bộ câu hỏi" value="${esc(name)}"><button onclick="save()">Lưu bộ câu hỏi</button>`;
 }
 async function loadFile(f) {
@@ -107,25 +115,36 @@ async function loadFile(f) {
   catch { $('err').textContent = 'Không đọc được file'; }
 }
 async function loadSheet() {
-  const r = await fetch('/api/sheet?url=' + encodeURIComponent($('gs').value), { headers: { 'x-pass': pass } });
+  const r = await fetch('/api/sheet?url=' + encodeURIComponent($('gs').value), { headers: { 'x-token': tok } });
   if (!r.ok) return $('err').textContent = (await r.json()).err;
   const wb = XLSX.read(await r.text(), { type: 'string' });
   showPending(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }), 'Google Sheet');
 }
 async function save() {
-  const r = await fetch('/api/quizzes', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-pass': pass },
+  const r = await fetch('/api/quizzes', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-token': tok },
     body: JSON.stringify({ title: $('tt').value.trim() || 'Quiz', questions: pending }) });
   if (!r.ok) return $('err').textContent = (await r.json()).err; hostMenu();
+}
+function hostLobby(pin) {
+  h(`<h1>Vào bằng PIN</h1><div class="pin">${pin}</div><div id="pl" class="big">Chưa có ai</div><button onclick="startGame()">Bắt đầu</button>`);
+}
+function startGame() { s.emit('host:start', r => { if (r && r.err) alert(r.err); }); }
+function hostRejoin(v, silent) {
+  s.emit('host:rejoin', { pin: v.pin, htoken: v.htoken, token: tok }, r => {
+    if (r.err) { sessionStorage.removeItem('qbh'); role = ''; gameActive = false; if (!silent) return; alert('Không vào lại được phòng: ' + r.err); return hostMenu(); }
+    role = 'host'; gameActive = true; curTitle = v.title; soundBtn(); if (v.bg) setBg(localStorage.qb_bg || '');
+    if (r.state === 'lobby') hostLobby(v.pin);
+  });
 }
 function create() {
   const music = $('mu').value, v = $('vol').value / 100, src = musicSrc();
   try { localStorage.qb_set = JSON.stringify({ music, vol: $('vol').value }); } catch {}
   curTitle = (($('qz').selectedOptions[0]) || {}).text || 'Quiz';
-  s.emit('host:create', { pass, id: $('qz').value, auto: $('au').checked, shuffleQ: $('sq').checked, shuffleA: $('sa').checked, wait: $('wt').value, min: $('mn').value, bg: bgData }, r => {
-    if (r.err) return alert(r.err); role = 'host'; gameActive = true; muted = false;
-    setBg(bgData); stopMusic(); if (src) startMusic(src, v); soundBtn();
-    h(`<h1>Vào bằng PIN</h1><div class="pin">${r.pin}</div><div id="pl" class="big">Chưa có ai</div>
-    <button onclick="s.emit('host:next')">Bắt đầu</button>`);
+  s.emit('host:create', { token: tok, id: $('qz').value, auto: $('au').checked, shuffleQ: $('sq').checked, shuffleA: $('sa').checked, wait: $('wt').value, min: $('mn').value, bg: bgData }, r => {
+    if (r.err) { alert(r.err); if (/phiên/.test(r.err)) hostLogin(); return; }
+    role = 'host'; gameActive = true; muted = false;
+    sessionStorage.qbh = JSON.stringify({ pin: r.pin, htoken: r.htoken, title: curTitle, bg: !!bgData });
+    setBg(bgData); stopMusic(); if (src) startMusic(src, v); soundBtn(); hostLobby(r.pin);
   });
 }
 // ---- âm thanh / hình nền / hiệu ứng / hộp xác nhận / lưu kết quả ----
@@ -152,9 +171,9 @@ async function loadBg(f) {
   if (!f) return;
   try {
     const img = new Image(); img.src = URL.createObjectURL(f); await img.decode();
-    const k = Math.min(1, 1280 / Math.max(img.width, img.height)), cv = document.createElement('canvas');
+    const k = Math.min(1, 1024 / Math.max(img.width, img.height)), cv = document.createElement('canvas');
     cv.width = img.width * k; cv.height = img.height * k; cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-    let q = .75, u = cv.toDataURL('image/jpeg', q); while (u.length > 500000 && q > .3) { q -= .1; u = cv.toDataURL('image/jpeg', q); }
+    let q = .75, u = cv.toDataURL('image/jpeg', q); while (u.length > 260000 && q > .3) { q -= .1; u = cv.toDataURL('image/jpeg', q); }
     bgData = u; try { localStorage.qb_bg = u; } catch {} refreshBg();
   } catch { $('bgs').textContent = 'Không đọc được ảnh'; }
 }
@@ -183,9 +202,18 @@ function ask(msg, yes = 'Có', no = 'Không') {
 const RK = 'qb_results';
 const getRes = () => { try { return JSON.parse(localStorage[RK] || '[]'); } catch { return []; } };
 const putRes = a => { try { localStorage[RK] = JSON.stringify(a); } catch {} };
-function saveRes(d) { putRes([{ id: Date.now(), title: curTitle, date: new Date().toLocaleString('vi-VN'), top: d.top, full: d.full, qs: d.qs }, ...getRes()].slice(0, 15)); }
-function viewRes(id) { const r = getRes().find(x => x.id === id); if (r) { lastEnd = r; showEnd(r, true, r); } }
-async function delRes(id) { if (await ask('Xoá kết quả này? Không thể khôi phục.', 'Xoá', 'Giữ lại')) { putRes(getRes().filter(x => x.id !== id)); hostMenu(); } }
+function saveRes(d) { if (getRes().some(x => x.rid === d.rid)) return; putRes([{ id: Date.now(), rid: d.rid, title: curTitle, date: new Date().toLocaleString('vi-VN'), top: d.top, full: d.full, qs: d.qs }, ...getRes()].slice(0, 15)); }
+async function viewRes(id, srv) {
+  let r;
+  if (srv) { const x = await fetch('/api/results/' + id, { headers: { 'x-token': tok } }); if (!x.ok) return alert('Không tải được kết quả'); r = await x.json(); r.date = new Date(r.created_at).toLocaleString('vi-VN'); }
+  else r = getRes().find(x => x.id === id);
+  if (r) { lastEnd = r; showEnd(r, true, r); }
+}
+async function delRes(id, srv) {
+  if (!await ask('Xoá kết quả này? Không thể khôi phục.', 'Xoá', 'Giữ lại')) return;
+  if (srv) await fetch('/api/results/' + id, { method: 'DELETE', headers: { 'x-token': tok } }); else putRes(getRes().filter(x => x.id !== id));
+  hostMenu();
+}
 window.addEventListener('beforeunload', e => { if (role === 'host' && gameActive) { e.preventDefault(); e.returnValue = ''; } });
 let lobbyList = [];
 s.on('lobby', n => {
@@ -194,23 +222,38 @@ s.on('lobby', n => {
 });
 async function kick(i) { if (lobbyList[i] && await ask('Đuổi ' + esc(lobbyList[i].name) + ' khỏi phòng?')) s.emit('host:kick', lobbyList[i].key); }
 s.on('kicked', () => { sessionStorage.removeItem('qb'); role = ''; alert('Bạn đã bị host mời ra khỏi phòng'); home(); });
-s.on('sent', () => h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`));
-s.on('connect', () => { $('net').style.display = 'none'; const v = JSON.parse(sessionStorage.qb || 'null'); if (role === 'player' && v) doJoin(v.pin, v.name, v.token, true); });
-s.on('disconnect', () => { if (role) $('net').style.display = 'block'; });
-s.on('question', q => {
-  cur = q; clearInterval(timer); let t = q.time;
-  const head = `<div>Câu ${q.i}/${q.total} · <b id="tm">${t}</b>s</div><div class="big">${esc(q.q)}</div>`;
-  if (role === 'host') h(head + `<div class="grid">${q.options.map((o, i) => `<div class="panel" style="margin:0;background:${COL[i]}">${SYM[i]} ${esc(o)}</div>`).join('')}</div><div id="an" class="big">0 đã trả lời</div>`);
-  else if (role === 'player') h(head + `<div class="grid">${q.options.map((o, i) => `<button style="background:${COL[i]}" onclick="ans(${i})">${SYM[i]} ${esc(o)}</button>`).join('')}</div>`);
-  timer = setInterval(() => { t--; if ($('tm')) $('tm').textContent = Math.max(t, 0); if (t <= 0) clearInterval(timer); }, 1000);
+s.on('sent', showSent);
+s.on('connect', () => {
+  $('net').style.display = 'none'; $('net').textContent = 'Mất kết nối, đang kết nối lại…';
+  const v = JSON.parse(sessionStorage.qb || 'null'), hv = JSON.parse(sessionStorage.qbh || 'null');
+  if (role === 'player' && v) doJoin(v.pin, v.name, v.token, true);
+  else if (role === 'host' && hv) hostRejoin(hv, true);
 });
-function ans(i) { s.emit('player:answer', i); h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`); }
+s.on('hostoff', () => { if (role === 'player') { $('net').textContent = 'Host đang mất kết nối, vui lòng chờ…'; $('net').style.display = 'block'; } });
+s.on('hoston', () => { if (role === 'player') $('net').style.display = 'none'; });
+s.on('disconnect', () => { if (role) $('net').style.display = 'block'; });
+let qEnd = 0;
+function drawQ(note) {
+  clearInterval(timer); const q = cur;
+  const head = `<div>Câu ${q.i}/${q.total} · <b id="tm">${Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0)}</b>s</div><div class="big">${esc(q.q)}</div>`;
+  if (role === 'host') h(head + `<div class="grid">${q.options.map((o, i) => `<div class="panel" style="margin:0;background:${COL[i]}">${SYM[i]} ${esc(o)}</div>`).join('')}</div><div id="an" class="big">0 đã trả lời</div>`);
+  else if (role === 'player') h(head + (note ? `<div class="er" style="color:#ffd602">${esc(note)}</div>` : '') + `<div class="grid">${q.options.map((o, i) => `<button style="background:${COL[i]}" onclick="ans(${i})">${SYM[i]} ${esc(o)}</button>`).join('')}</div>`);
+  timer = setInterval(() => { const t = Math.max(Math.ceil((qEnd - Date.now()) / 1000), 0); if ($('tm')) $('tm').textContent = t; if (t <= 0) clearInterval(timer); }, 500);
+}
+s.on('question', q => { cur = q; qEnd = Date.now() + q.time * 1000; drawQ(); });
+const showSent = () => h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`);
+function ans(i) {
+  document.querySelectorAll('.grid button').forEach(b => b.disabled = true);
+  let done = false;
+  const to = setTimeout(() => { if (!done) { done = true; drawQ('Chưa gửi được, hãy chọn lại'); } }, 5000);
+  s.emit('player:answer', i, r => { if (done) return; done = true; clearTimeout(to); if (r && r.ok) showSent(); else drawQ((r && r.err) || 'Chưa gửi được, hãy chọn lại'); });
+}
 s.on('answered', d => { if ($('an')) $('an').textContent = `${d.done}/${d.total} đã trả lời`; });
 const board = (t, me) => t.map((p, i) => `<div class="row ${p.name === me ? 'me' : ''}"><span>${i + 1}. ${esc(p.name)}</span><b>${p.score}</b></div>`).join('');
 s.on('reveal', d => {
   clearInterval(timer); const mx = Math.max(...d.counts, 1), t0 = Date.now();
-  h(`<div class="big">Đáp án đúng: ${SYM[d.correct]} ${esc(cur.options[d.correct])}</div>
-  ${cur.options.map((o, i) => `<div class="${i === d.correct ? '' : 'dim'}" style="text-align:left;margin:8px 0">${SYM[i]} ${esc(o)} <span class="bar" style="width:${d.counts[i] / mx * 60}%;background:${COL[i]}"></span> ${d.counts[i]}</div>`).join('')}
+  h(`<div class="big">Đáp án đúng: ${SYM[d.correct]} ${esc(d.options[d.correct])}</div>
+  ${d.options.map((o, i) => `<div class="${i === d.correct ? '' : 'dim'}" style="text-align:left;margin:8px 0">${SYM[i]} ${esc(o)} <span class="bar" style="width:${d.counts[i] / mx * 60}%;background:${COL[i]}"></span> ${d.counts[i]}</div>`).join('')}
   <h2>Bảng xếp hạng</h2>${board(d.top)}<button id="nx" disabled></button><div id="au2"></div>`);
   const label = d.last ? 'Kết thúc' : 'Câu tiếp theo';
   const tick = () => {
@@ -251,7 +294,9 @@ function csv() {
 }
 s.on('closed', () => { sessionStorage.removeItem('qb'); role = ''; alert('Host đã thoát phòng'); home(); });
 const saved = JSON.parse(sessionStorage.qb || 'null');
+const savedH = JSON.parse(sessionStorage.qbh || 'null');
 if (saved) doJoin(saved.pin, saved.name, saved.token, true);
-else if (sessionStorage.qbp) { pass = sessionStorage.qbp; hostMenu(true); }
+else if (sessionStorage.qbp && savedH) { tok = sessionStorage.qbp; hostRejoin(savedH, true); }
+else if (sessionStorage.qbp) { tok = sessionStorage.qbp; hostMenu(true); }
 else home();
 </script></body></html>
