@@ -13,7 +13,7 @@ button.ghost{background:transparent;border:2px solid #fff}button.sm{width:auto;p
 .row{display:flex;justify-content:space-between;background:#fff;color:#222;border-radius:8px;padding:10px 14px;margin:6px 0}
 .bar{display:inline-block;height:14px;background:#fff;border-radius:7px;vertical-align:middle}.dim{opacity:.35}
 .er{color:#e21b3c;margin-top:6px}.row.me{outline:3px solid #ffd602}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ck{display:block;margin:8px 0}small{display:block;color:#666;margin:6px 0}h2{margin:18px 0 6px}.ok{background:#26890c}.bad{background:#e21b3c}.panel{border-radius:12px;padding:26px;margin-top:30px}
-</style></head><body><main id="app"></main>
+</style></head><body><div id="net" style="display:none;position:fixed;top:0;left:0;right:0;background:#e21b3c;padding:6px;font-size:.9rem">Mất kết nối, đang kết nối lại…</div><main id="app"></main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -29,10 +29,16 @@ function home() {
   <button onclick="join()">Vào chơi</button><div id="err" class="er"></div></div>
   <button class="ghost" onclick="hostLogin()">Tôi là host / giáo viên</button>`);
 }
-function join() {
-  s.emit('player:join', { pin: $('pin').value.trim(), name: $('nm').value }, r => {
-    if (r.err) return $('err').textContent = r.err;
-    role = 'player'; h(`<h1>Đã vào phòng!</h1><div class="big">Chờ host bắt đầu…</div>`);
+function join() { doJoin($('pin').value.trim(), $('nm').value, '', false); }
+function doJoin(pin, name, token, silent) {
+  s.emit('player:join', { pin, name, token }, r => {
+    if (r.err) {
+      if (silent) { sessionStorage.removeItem('qb'); role = ''; alert('Không vào lại được phòng: ' + r.err); home(); }
+      else $('err').textContent = r.err;
+      return;
+    }
+    role = 'player'; sessionStorage.qb = JSON.stringify({ pin, name: r.name, token: r.token });
+    if (r.state === 'lobby') h(`<h1>Đã vào phòng!</h1><div class="big">Chờ host bắt đầu…</div>`);
   });
 }
 function hostLogin() {
@@ -49,6 +55,7 @@ async function hostMenu(fromLogin) {
   <div class="card"><b>1. Chọn bộ câu hỏi</b><select id="qz">${qs.map(q => `<option value="${esc(q.id)}">${esc(q.title)}</option>`).join('')}</select>
   <b>2. Cài đặt qua câu</b>
   <label class="ck"><input type="checkbox" id="au" checked> Tự động qua câu khi hết thời gian chờ</label>
+  <label class="ck"><input type="checkbox" id="sq"> Xáo trộn thứ tự câu hỏi</label><label class="ck"><input type="checkbox" id="sa" checked> Xáo trộn vị trí đáp án (mỗi người chơi một kiểu khác nhau)</label>
   <div class="two"><div>Thời gian chờ tự qua (giây)<input id="wt" type="number" value="10" min="0" max="120"></div>
   <div>Tối thiểu trước khi bấm qua được (giây)<input id="mn" type="number" value="5" min="0" max="60"></div></div>
   <small>Bỏ chọn tự động = chỉ qua câu khi host bấm nút (sau thời gian tối thiểu).</small>
@@ -95,13 +102,22 @@ async function save() {
   if (!r.ok) return $('err').textContent = (await r.json()).err; hostMenu();
 }
 function create() {
-  s.emit('host:create', { pass, id: $('qz').value, auto: $('au').checked, wait: $('wt').value, min: $('mn').value }, r => {
+  s.emit('host:create', { pass, id: $('qz').value, auto: $('au').checked, shuffleQ: $('sq').checked, shuffleA: $('sa').checked, wait: $('wt').value, min: $('mn').value }, r => {
     if (r.err) return alert(r.err); role = 'host';
     h(`<h1>Vào bằng PIN</h1><div class="pin">${r.pin}</div><div id="pl" class="big">Chưa có ai</div>
     <button onclick="s.emit('host:next')">Bắt đầu</button>`);
   });
 }
-s.on('lobby', n => { if ($('pl')) $('pl').innerHTML = n.length ? `<div>${n.length} người chơi</div>` + n.map(x => `<span class="chip">${esc(x)}</span>`).join('') : 'Chưa có ai'; });
+let lobbyList = [];
+s.on('lobby', n => {
+  lobbyList = n; if (!$('pl')) return;
+  $('pl').innerHTML = n.length ? `<div>${n.length} người chơi</div>` + n.map((x, i) => `<span class="chip ${x.online ? '' : 'dim'}">${esc(x.name)} <a href="#" style="color:#fff" onclick="kick(${i});return false">✕</a></span>`).join('') : 'Chưa có ai';
+});
+function kick(i) { if (lobbyList[i] && confirm('Đuổi ' + lobbyList[i].name + '?')) s.emit('host:kick', lobbyList[i].key); }
+s.on('kicked', () => { sessionStorage.removeItem('qb'); role = ''; alert('Bạn đã bị host mời ra khỏi phòng'); home(); });
+s.on('sent', () => h(`<h1>Đã gửi!</h1><div class="big">Chờ mọi người…</div>`));
+s.on('connect', () => { $('net').style.display = 'none'; const v = JSON.parse(sessionStorage.qb || 'null'); if (role === 'player' && v) doJoin(v.pin, v.name, v.token, true); });
+s.on('disconnect', () => { if (role) $('net').style.display = 'block'; });
 s.on('question', q => {
   cur = q; clearInterval(timer); let t = q.time;
   const head = `<div>Câu ${q.i}/${q.total} · <b id="tm">${t}</b>s</div><div class="big">${esc(q.q)}</div>`;
@@ -115,7 +131,7 @@ const board = (t, me) => t.map((p, i) => `<div class="row ${p.name === me ? 'me'
 s.on('reveal', d => {
   clearInterval(timer); const mx = Math.max(...d.counts, 1), t0 = Date.now();
   h(`<div class="big">Đáp án đúng: ${SYM[d.correct]} ${esc(cur.options[d.correct])}</div>
-  ${cur.options.map((o, i) => `<div class="${i === d.correct ? '' : 'dim'}" style="text-align:left;margin:8px 0">${SYM[i]} <span class="bar" style="width:${d.counts[i] / mx * 60}%;background:${COL[i]}"></span> ${d.counts[i]}</div>`).join('')}
+  ${cur.options.map((o, i) => `<div class="${i === d.correct ? '' : 'dim'}" style="text-align:left;margin:8px 0">${SYM[i]} ${esc(o)} <span class="bar" style="width:${d.counts[i] / mx * 60}%;background:${COL[i]}"></span> ${d.counts[i]}</div>`).join('')}
   <h2>Bảng xếp hạng</h2>${board(d.top)}<button id="nx" disabled></button><div id="au2"></div>`);
   const label = d.last ? 'Kết thúc' : 'Câu tiếp theo';
   const tick = () => {
@@ -133,7 +149,20 @@ s.on('result', r => {
   <div class="big">Tổng ${r.score} điểm · Hạng ${r.rank}/${r.total}</div>
   <h2>Bảng xếp hạng</h2>${board(r.top, r.name)}`);
 });
-s.on('end', t => h(`<h1>🏆 Kết quả</h1>${board(t)}<button onclick="location.reload()">Chơi lại</button>`));
-s.on('closed', () => { alert('Host đã thoát phòng'); home(); });
-home();
+let lastEnd = null;
+s.on('end', d => {
+  clearInterval(timer); lastEnd = d; sessionStorage.removeItem('qb');
+  h(`<h1>🏆 Kết quả</h1>${board(d.top)}` + (d.full ? `<button onclick="csv()">⬇ Tải bảng điểm (CSV)</button><button class="ghost" onclick="hostMenu()">Về trang host</button>` : `<button onclick="location.reload()">Chơi lại</button>`));
+});
+function csv() {
+  const d = lastEnd, e = v => { v = String(v); if (/^[=+\-@]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const rows = [['Hạng', 'Tên', 'Tổng điểm', 'Số câu đúng', ...d.qs.map((q, i) => `Câu ${i + 1}: ${q.slice(0, 40)}`)],
+    ...d.full.map((p, i) => [i + 1, p.name, p.score, p.correct, ...p.log])];
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.map(r => r.map(e).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'ket-qua.csv'; a.click();
+}
+s.on('closed', () => { sessionStorage.removeItem('qb'); role = ''; alert('Host đã thoát phòng'); home(); });
+const saved = JSON.parse(sessionStorage.qb || 'null');
+if (saved) doJoin(saved.pin, saved.name, saved.token, true); else home();
 </script></body></html>
